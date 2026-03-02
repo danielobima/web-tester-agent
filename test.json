@@ -1,0 +1,32 @@
+{
+  "id": "test-1771922531116",
+  "name": "Search for 'playwright' in the search bar",
+  "startUrl": "https://news.ycombinator.com",
+  "steps": [
+    {
+      "id": "step-1",
+      "action": {
+        "kind": "type",
+        "ref": "e331",
+        "text": "playwright"
+      },
+      "description": "Generated for goal: Search for 'playwright' in the search bar"
+    },
+    {
+      "id": "step-2",
+      "action": {
+        "kind": "navigate",
+        "url": "https://hn.algolia.com/?query=playwright"
+      },
+      "description": "Generated for goal: Search for 'playwright' in the search bar"
+    },
+    {
+      "id": "step-3",
+      "action": {
+        "kind": "screenshot",
+        "name": "success"
+      },
+      "description": "Generated for goal: Search for 'playwright' in the search bar"
+    }
+  ]
+}

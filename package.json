@@ -1,0 +1,28 @@
+{
+  "name": "ai-qa-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^3.0.30",
+    "@ai-sdk/openai": "^3.0.30",
+    "@anthropic-ai/sdk": "^0.78.0",
+    "ai": "^6.0.97",
+    "dotenv": "^17.3.1",
+    "playwright": "^1.58.2",
+    "zod": "^4.3.6"
+  }
+}
