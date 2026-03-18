@@ -281,7 +281,13 @@ export const ActionSchema = z.discriminatedUnion("kind", [
       name: z
         .string()
         .describe(
-          "Name describing what the screenshot captures. Use 'success' when the goal is achieved!",
+          "REQUIRED: A valid filename (no extension) describing what the screenshot captures. Example: 'email_icon_1' or 'success'. Do NOT omit this field.",
+        ),
+      ref: z
+        .string()
+        .optional()
+        .describe(
+          "If provided, takes a cropped screenshot of only the specific DOM element matching this ref (e.g., 'e12')",
         ),
       fullPage: z
         .boolean()
@@ -295,3 +301,32 @@ export const ActionSchema = z.discriminatedUnion("kind", [
 
 // Extract the inferred type to use across the project
 export type Action = z.infer<typeof ActionSchema>;
+
+// Define the schema for evaluating intermediate steps during replay
+export const AssertionSchema = z.object({
+  ref: z
+    .string()
+    .describe("The 'ref' ID of the element to assert on, if applicable"),
+  type: z
+    .enum([
+      "isVisible",
+      "isHidden",
+      "textContains",
+      "textEquals",
+      "hasClass",
+      "hasAttribute",
+    ])
+    .describe("The type of assertion to evaluate"),
+  value: z
+    .string()
+    .optional()
+    .describe(
+      "The expected value (required for textContains, textEquals, hasClass, hasAttribute)",
+    ),
+  attributeNode: z
+    .string()
+    .optional()
+    .describe("The name of the attribute to check (required for hasAttribute)"),
+});
+
+export type Assertion = z.infer<typeof AssertionSchema>;

@@ -1,9 +1,114 @@
-import { generateObject } from "ai";
-import { google } from "@ai-sdk/google";
+import { generateObject, type LanguageModel } from "ai";
 import { BrowserManager } from "./browser";
-import { ActionSchema, Action } from "./actions";
+import { ActionSchema, Action, Assertion } from "./actions";
 import { TestSerializer, TestStep } from "./recorder";
 import * as path from "path";
+
+async function evaluateAssertions(
+  assertions: Assertion[],
+  browser: BrowserManager,
+  refs: Record<string, any>,
+) {
+  if (!browser.page) throw new Error("No active page to evaluate assertions");
+
+  for (const assertion of assertions) {
+    console.log(
+      `[Replay] Evaluating assertion: ${assertion.type} on ref ${assertion.ref}`,
+    );
+    let locator;
+
+    if (assertion.ref && refs[assertion.ref]) {
+      locator = await browser.getLocatorByRef(assertion.ref, refs);
+    } else if (assertion.ref && !refs[assertion.ref]) {
+      if (assertion.type === "isHidden") {
+        console.log(
+          `[Replay] Assertion passed: ref '${assertion.ref}' is entirely absent from the DOM.`,
+        );
+        continue; // Implicitly hidden/removed!
+      }
+      throw new Error(
+        `Assertion failed: Could not resolve ref '${assertion.ref}' in the current accessibility tree.`,
+      );
+    }
+
+    if (!locator && assertion.ref) {
+      throw new Error(
+        `Assertion failed: Locator not found for ref '${assertion.ref}'`,
+      );
+    }
+
+    // Default to the body/root if no ref is provided (e.g. for general textContains on the page)
+    if (!locator) {
+      locator = browser.page.locator("body");
+    }
+
+    try {
+      switch (assertion.type) {
+        case "isVisible":
+          await locator.waitFor({ state: "visible", timeout: 5000 });
+          break;
+        case "isHidden":
+          await locator.waitFor({ state: "hidden", timeout: 5000 });
+          break;
+        case "textContains":
+          if (!assertion.value)
+            throw new Error("Assertion 'textContains' requires a value.");
+          // Ensure it's rendered, wait for text
+          // Playwright locator.filter({ hasText }) or expect equivalent
+          const textContent = await locator.textContent();
+          if (!textContent || !textContent.includes(assertion.value)) {
+            throw new Error(
+              `Expected text '${assertion.value}' not found in element.`,
+            );
+          }
+          break;
+        case "textEquals":
+          if (!assertion.value)
+            throw new Error("Assertion 'textEquals' requires a value.");
+          const exactText = await locator.textContent();
+          if (exactText?.trim() !== assertion.value) {
+            throw new Error(
+              `Expected exact text '${assertion.value}', got '${exactText?.trim()}'`,
+            );
+          }
+          break;
+        case "hasClass":
+          if (!assertion.value)
+            throw new Error("Assertion 'hasClass' requires a value.");
+          const classAttr = await locator.getAttribute("class");
+          if (!classAttr || !classAttr.split(" ").includes(assertion.value)) {
+            throw new Error(
+              `Element missing expected class '${assertion.value}'. Current classes: '${classAttr}'`,
+            );
+          }
+          break;
+        case "hasAttribute":
+          if (!assertion.attributeNode)
+            throw new Error(
+              "Assertion 'hasAttribute' requires an attributeNode.",
+            );
+          const attrVal = await locator.getAttribute(assertion.attributeNode);
+          if (assertion.value && attrVal !== assertion.value) {
+            throw new Error(
+              `Attribute '${assertion.attributeNode}' value '${attrVal}' does not match expected '${assertion.value}'`,
+            );
+          }
+          if (attrVal === null) {
+            throw new Error(
+              `Element missing expected attribute '${assertion.attributeNode}'`,
+            );
+          }
+          break;
+        default:
+          throw new Error(`Unknown assertion type: ${(assertion as any).type}`);
+      }
+    } catch (e: any) {
+      throw new Error(
+        `Assertion type '${assertion.type}' failed: ${e.message}`,
+      );
+    }
+  }
+}
 
 // Extract to heal step
 async function heal(
@@ -11,6 +116,7 @@ async function heal(
   browser: BrowserManager,
   errorMsg: string,
   testGoal: string,
+  model: LanguageModel,
 ): Promise<Action> {
   console.log(
     `[Healer] Attempting to heal step: ${JSON.stringify(step.action)}`,
@@ -18,18 +124,21 @@ async function heal(
 
   const { text: snapshot } = await browser.getSnapshotForLLM();
 
-  const { object: action } = await generateObject({
-    model: google("gemini-2.5-flash"),
-    schema: ActionSchema,
-    system: `You are a self-healing QA agent. A deterministic test runner encountered an error while trying to execute an action.
-    
-Original Goal: ${testGoal}
-Broken Action: ${JSON.stringify(step.action)}
-Error Encountered: ${errorMsg}
+  const fs = await import("fs/promises");
+  const path = await import("path");
+  const systemPromptTemplate = await fs.readFile(
+    path.join(__dirname, "replay-prompt.txt"),
+    "utf-8",
+  );
+  const systemPrompt = systemPromptTemplate
+    .replace("{{testGoal}}", testGoal)
+    .replace("{{brokenAction}}", JSON.stringify(step.action))
+    .replace("{{errorMsg}}", errorMsg);
 
-Analyze the current HTML snapshot. The UI might have changed, causing the previous action to fail.
-Propose the CORRECT next action to keep the test moving forward.
-Use 'click', 'type', 'extract_text', or fallbacks if needed.`,
+  const { object: action } = await generateObject({
+    model: model,
+    schema: ActionSchema,
+    system: systemPrompt,
     messages: [
       {
         role: "user",
@@ -45,6 +154,7 @@ Use 'click', 'type', 'extract_text', or fallbacks if needed.`,
 export async function replayTest(
   filePath: string,
   browser: BrowserManager,
+  model: LanguageModel,
   artifactsDir?: string,
 ) {
   const serializer = new TestSerializer();
@@ -69,8 +179,19 @@ export async function replayTest(
     console.log(`[Replay] Executing Step ${i + 1}: ${step.action.kind}`);
 
     try {
+      await browser.waitForStability();
       await browser.getSnapshotForLLM();
       await browser.execute(step.action);
+
+      // Post-action verification
+      await browser.waitForStability();
+      const { refs } = await browser.getSnapshotForLLM(true);
+
+      if (step.assertions && step.assertions.length > 0) {
+        await evaluateAssertions(step.assertions, browser, refs);
+      } else {
+        console.log(`[Replay] No assertions to evaluate for this step.`);
+      }
 
       if (artifactsDir && browser.page) {
         await browser.page.screenshot({
@@ -82,7 +203,7 @@ export async function replayTest(
       console.error(`[Replay] ❌ Step ${i + 1} Failed: ${e.message}`);
 
       // Attempt Healing
-      const newAction = await heal(step, browser, e.message, test.name);
+      const newAction = await heal(step, browser, e.message, test.name, model);
 
       try {
         console.log(`[Replay] 🛠️ Executing healed action...`);

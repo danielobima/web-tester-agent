@@ -4,6 +4,8 @@ import {
   type Page,
   type BrowserContext,
 } from "playwright";
+import * as fs from "fs";
+import * as path from "path";
 import { type Action } from "./actions";
 import { snapshotRoleViaPlaywright } from "./browser/pw-tools-core.snapshot";
 import { getRoleSnapshotStats } from "./browser/pw-role-snapshot";
@@ -78,7 +80,10 @@ export class BrowserManager {
   }
 
   // Returns snapshot state and populates the refs mapping
-  async getSnapshotForLLM() {
+  async getSnapshotForLLM(
+    quiet: boolean = false,
+    interactiveOnly: boolean = false,
+  ) {
     if (!this.page) throw new Error("Browser not initialized");
 
     // OpenClaw's snapshotRoleViaPlaywright generates the tree and sets up refs
@@ -87,18 +92,53 @@ export class BrowserManager {
         cdpUrl: this.cdpUrl,
         targetId: this.targetId,
         selector: ":root",
+        options: interactiveOnly ? { interactive: true } : undefined,
       });
 
-      console.log(`[Browser] Built Snapshot. Stats:`, stats);
+      if (!quiet) console.log(`[Browser] Built Snapshot. Stats:`, stats);
       return {
         text: snapshot,
         refs,
         axTree: null, // The snapshot string IS the axTree for aria methods
       };
     } catch (e: any) {
-      console.warn(`[Browser] snapshotRoleViaPlaywright failed: ${e.message}`);
+      if (!quiet)
+        console.warn(
+          `[Browser] snapshotRoleViaPlaywright failed: ${e.message}`,
+        );
       return { text: "Error fetching snapshot", refs: {}, axTree: null };
     }
+  }
+
+  // Wait for the accessibility tree to remain unchanged for a given polling period
+  async waitForStability(
+    timeoutMs: number = 10000,
+    pollingMs: number = 500,
+  ): Promise<void> {
+    const startTime = Date.now();
+    let previousSnapshot = "";
+
+    while (Date.now() - startTime < timeoutMs) {
+      const { text: currentSnapshot } = await this.getSnapshotForLLM(
+        true,
+        true,
+      ); // Use interactiveOnly = true for stability check
+      if (currentSnapshot === previousSnapshot && previousSnapshot !== "") {
+        console.log(
+          `[Browser] Page stabilized after ${Date.now() - startTime}ms`,
+        );
+        return;
+      }
+      previousSnapshot = currentSnapshot;
+      await new Promise((resolve) => setTimeout(resolve, pollingMs));
+    }
+    console.warn(`[Browser] Page did not stabilize within ${timeoutMs}ms`);
+  }
+
+  // Helper to get a Playwright Locator from a string 'ref' and the refs mapping
+  async getLocatorByRef(ref: string, refs: Record<string, any>) {
+    if (!this.page) throw new Error("Browser not initialized");
+    return refLocator(this.page, ref);
   }
 
   async execute(action: Action) {
@@ -225,17 +265,37 @@ export class BrowserManager {
         break;
 
       case "screenshot":
-        if (action.fullPage) {
+        if (action.ref) {
+          const result = await takeScreenshotViaPlaywright({
+            ...baseOpts,
+            ref: action.ref,
+            type: "jpeg",
+          });
+          const dest = path.join(
+            process.cwd(),
+            "artifacts",
+            `${action.name}.jpeg`,
+          );
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, result.buffer);
+        } else if (action.fullPage) {
           await this.page.screenshot({
             fullPage: true,
             path: `artifacts/${action.name}.png`,
           });
         } else {
           // the tool handles regular screenshots
-          await takeScreenshotViaPlaywright({
+          const result = await takeScreenshotViaPlaywright({
             ...baseOpts,
-            path: `artifacts/${action.name}.jpeg`,
-          } as any);
+            type: "jpeg",
+          });
+          const dest = path.join(
+            process.cwd(),
+            "artifacts",
+            `${action.name}.jpeg`,
+          );
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, result.buffer);
         }
         break;
     }

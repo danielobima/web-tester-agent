@@ -1,4 +1,4 @@
-import { Action } from "./actions";
+import { Action, Assertion } from "./actions";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -15,7 +15,10 @@ export interface TestStep {
   stateDescription?: string;
   actionIntent?: string;
   actionResult?: string;
+  assertions?: Assertion[];
   healingHistory?: HealingRecord[];
+  stateSnapshot?: string;
+  axTree?: any;
 }
 
 export interface SerializedTest {
@@ -23,11 +26,13 @@ export interface SerializedTest {
   name: string;
   startUrl: string;
   steps: TestStep[];
+  originalSteps?: TestStep[];
 }
 
 export class TestSerializer {
   private test: SerializedTest | null = null;
   private stepCounter = 0;
+  private activeOutPath: string | null = null;
 
   startTest(name: string, startUrl: string) {
     this.test = {
@@ -39,12 +44,19 @@ export class TestSerializer {
     this.stepCounter = 0;
   }
 
+  setOutPath(filePath: string) {
+    this.activeOutPath = filePath;
+  }
+
   logAction(
     action: Action,
     options?: {
       stateDescription?: string;
       actionIntent?: string;
       actionResult?: string;
+      assertions?: Assertion[];
+      stateSnapshot?: string;
+      axTree?: any;
     },
   ) {
     if (!this.test) throw new Error("Test not started");
@@ -59,6 +71,9 @@ export class TestSerializer {
       stateDescription: options?.stateDescription,
       actionIntent: options?.actionIntent,
       actionResult: options?.actionResult,
+      assertions: options?.assertions,
+      stateSnapshot: options?.stateSnapshot,
+      axTree: options?.axTree,
     });
   }
 
@@ -68,11 +83,12 @@ export class TestSerializer {
     this.test.steps[this.test.steps.length - 1].actionResult = resultDesc;
   }
 
-  async saveTest(filePath: string) {
+  async saveTest(filePath?: string) {
     if (!this.test) throw new Error("Test not started");
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(this.test, null, 2), "utf-8");
-    console.log(`[Serializer] Saved test to ${filePath}`);
+    const targetPath = filePath || this.activeOutPath;
+    if (!targetPath) return;
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, JSON.stringify(this.test, null, 2), "utf-8");
   }
 
   async loadTest(filePath: string): Promise<SerializedTest> {

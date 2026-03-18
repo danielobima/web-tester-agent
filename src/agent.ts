@@ -1,7 +1,6 @@
-import { generateObject } from "ai";
-import { google } from "@ai-sdk/google";
+import { generateObject, type LanguageModel } from "ai";
 import { BrowserManager } from "./browser";
-import { ActionSchema } from "./actions";
+import { ActionSchema, AssertionSchema } from "./actions";
 import { TestSerializer } from "./recorder";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -10,6 +9,7 @@ import { z } from "zod";
 export async function runAgent(
   requirement: string,
   browser: BrowserManager,
+  model: LanguageModel,
   serializer?: TestSerializer,
   artifactsDir?: string,
 ) {
@@ -24,9 +24,17 @@ export async function runAgent(
   console.log(`[Agent] Starting goal: "${requirement}"`);
 
   let previousSnapshot = "";
+  let lastActionString = "";
+  let consecutiveSameAction = 0;
+
+  const systemPrompt = await fs.readFile(
+    path.join(__dirname, "prompt.txt"),
+    "utf-8",
+  );
 
   while (true) {
     // 1. Observe
+    await browser.waitForStability();
     const { text: snapshot, axTree, refs } = await browser.getSnapshotForLLM();
     console.log(`[Agent] Acquired snapshot (${snapshot.length} chars)`);
 
@@ -56,6 +64,12 @@ export async function runAgent(
           fullPage: false,
         });
       }
+
+      await fs.writeFile(
+        path.join(artifactsDir, `step-${stepCounter}-history.json`),
+        JSON.stringify(history, null, 2),
+        "utf-8",
+      );
     }
 
     // 2. Decide (Call LLM)
@@ -64,6 +78,7 @@ export async function runAgent(
     let stateDescription: string | undefined;
     let actionIntent: string | undefined;
     let actionResult: string | undefined;
+    let assertions: any | undefined;
 
     let retries = 0;
     const maxRetries = 3;
@@ -71,7 +86,7 @@ export async function runAgent(
     while (retries < maxRetries) {
       try {
         const result = await generateObject({
-          model: google("gemini-2.5-flash"),
+          model: model,
           schema: z.object({
             currentStateDescription: z
               .string()
@@ -90,18 +105,14 @@ export async function runAgent(
                 "A short sentence describing the result of the PREVIOUS action based on the current state. Leave empty on the first step.",
               ),
             action: ActionSchema,
+            assertions: z
+              .array(AssertionSchema)
+              .optional()
+              .describe(
+                "An array of assertions that MUST be true AFTER the action completes. Use this to deterministically verify the action succeeded during replay.",
+              ),
           }),
-          system: `You are an autonomous QA tester. Your goal is to fulfill the user's test requirement. You have access to a browser. Analyze the simplified HTML and choose the next best action.
-          
-  If the goal is achieved, output action 'screenshot' with name 'success'.
-  For clicking, prefer using the 'click' action with the 'ref' ID if the element is available in the snapshot.
-  WARNING: Do not interact with structural parent nodes like 'cell', 'row', or 'main' if a more specific interactive child element (like a link or button) exists.
-  For navigating to a URL provided in the requirement, use 'navigate'.
-  Only use 'click_selector' or 'evaluate' as a fallback if the element cannot be targeted by its ref.
-
-  CRITICAL: You MUST output a valid JSON object matching the provided schema exactly. 
-  The discriminator field tells which action to take. Ensure you output 'kind': 'action_name' and NOT 'action': 'action_name'.
-  Do not output anything else.`,
+          system: systemPrompt,
           messages: [
             ...history,
             {
@@ -110,15 +121,21 @@ export async function runAgent(
                 snapshot === previousSnapshot
                   ? "\n\nWARNING: The page state has NOT changed since your last action! Stop repeating the exact same action and try a different approach."
                   : ""
+              }${
+                consecutiveSameAction > 0
+                  ? "\n\nCRITICAL WARNING: You have proposed the exact same action that just failed! DO NOT REPEAT YOURSELF. You MUST choose a different `ref` or use a fallback method like `evaluate`."
+                  : ""
               }`,
             },
           ],
         });
+
         const response = result.object;
         action = response.action;
         stateDescription = response.currentStateDescription;
         actionIntent = response.intendedActionDescription;
         actionResult = response.previousActionResult;
+        assertions = response.assertions;
         break; // Success, exit retry loop
       } catch (e: any) {
         retries++;
@@ -174,23 +191,53 @@ export async function runAgent(
         serializer.logAction(action, {
           stateDescription,
           actionIntent,
+          assertions,
         });
+        await serializer.saveTest();
       }
       history.push({
         role: "assistant",
-        content: `I chose to execute action: ${JSON.stringify(action)}`,
+        content: JSON.stringify({
+          stateDescription,
+          actionIntent,
+          action,
+          assertions,
+        }),
       });
-      history.push({ role: "user", content: `Action executed successfully.` });
+      history.push({
+        role: "user",
+        content: actionResult || `Action executed successfully.`,
+      });
+      lastActionString = JSON.stringify(action);
+      consecutiveSameAction = 0;
     } catch (e: any) {
       console.error(`[Agent] Action execution failed: ${e.message}`);
       history.push({
         role: "assistant",
-        content: `I chose to execute action: ${JSON.stringify(action)}`,
+        content: JSON.stringify({
+          stateDescription,
+          actionIntent,
+          action,
+          assertions,
+        }),
       });
       history.push({
         role: "user",
         content: `Action failed with error: ${e.message}`,
       });
+
+      const currentActionStr = JSON.stringify(action);
+      if (currentActionStr === lastActionString) {
+        consecutiveSameAction++;
+        if (consecutiveSameAction >= 3) {
+          throw new Error(
+            `[Agent] Aborting test: Agent is caught in a loop, repeating the exact same failing action 3 times: ${currentActionStr}`,
+          );
+        }
+      } else {
+        lastActionString = currentActionStr;
+        consecutiveSameAction = 1;
+      }
     }
 
     // 5. Check Termination condition

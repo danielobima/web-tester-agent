@@ -5,6 +5,8 @@ import { replayTest } from "./replay";
 import * as dotenv from "dotenv";
 import * as path from "path";
 import * as fs from "fs/promises";
+import { google } from "@ai-sdk/google";
+import { createOllama } from "ollama-ai-provider-v2";
 
 dotenv.config();
 
@@ -23,9 +25,29 @@ async function main() {
   await browser.init(false); // Disable headless to watch the bot work
 
   try {
+    const providerArg = args.find((a) => a.startsWith("--provider="));
+    const provider = providerArg ? providerArg.split("=")[1] : "google";
+    const modelArg = args.find((a) => a.startsWith("--model="));
+    let modelName = modelArg ? modelArg.split("=")[1] : "";
+
+    let model;
+    if (provider === "ollama") {
+      const ollama = createOllama();
+      if (!modelName) modelName = "deepseek-r1:7b";
+      model = ollama(modelName);
+    } else {
+      if (!modelName) modelName = "gemini-2.5-flash";
+      model = google(modelName);
+    }
+
     if (command === "record") {
       const saveArtifacts = args.includes("--save-artifacts");
-      const cleanArgs = args.filter((a) => a !== "--save-artifacts");
+      const cleanArgs = args.filter(
+        (a) =>
+          a !== "--save-artifacts" &&
+          !a.startsWith("--provider=") &&
+          !a.startsWith("--model="),
+      );
 
       const goal = cleanArgs[1];
       const startUrl = cleanArgs[2];
@@ -49,23 +71,23 @@ async function main() {
             resultsDir,
             outPath.endsWith(".json") ? outPath : `${outPath}.json`,
           );
+      serializer.setOutPath(finalOutPath);
 
       await browser.execute({ kind: "navigate", url: startUrl });
-      await runAgent(goal, browser, serializer, artifactsDir);
+      await runAgent(goal, browser, model as any, serializer, artifactsDir);
 
       const rawTest = serializer.getTest();
-      if (rawTest) {
-        console.log(`[CLI] Starting compilation/optimization pass...`);
-        const { optimizeTest } = await import("./optimizer");
-        const optimized = await optimizeTest(rawTest);
-        serializer.setTest(optimized);
-      }
 
       await serializer.saveTest(finalOutPath);
       console.log(`[CLI] Recording finished. Saved to ${finalOutPath}`);
     } else if (command === "replay") {
       const saveArtifacts = args.includes("--save-artifacts");
-      const cleanArgs = args.filter((a) => a !== "--save-artifacts");
+      const cleanArgs = args.filter(
+        (a) =>
+          a !== "--save-artifacts" &&
+          !a.startsWith("--provider=") &&
+          !a.startsWith("--model="),
+      );
 
       const file = cleanArgs[1];
       if (!file) throw new Error("Missing file path for replay.");
@@ -75,7 +97,7 @@ async function main() {
         : undefined;
 
       console.log(`[CLI] Starting Replay Mode...`);
-      await replayTest(file, browser, artifactsDir);
+      await replayTest(file, browser, model as any, artifactsDir);
       console.log(`[CLI] Replay finished.`);
     } else {
       console.log("Unknown command. Use 'record' or 'replay'.");
