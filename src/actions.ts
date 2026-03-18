@@ -7,7 +7,17 @@ export const ActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("click"),
       ref: z
         .string()
+        .optional()
         .describe("The 'ref' ID of the element to click (e.g., 'e12')"),
+      role: z
+        .string()
+        .optional()
+        .describe("The ARIA role of the element to click"),
+      name: z
+        .string()
+        .optional()
+        .describe("The accessible name of the element to click"),
+      nth: z.number().optional().describe("The index if multiple match"),
       doubleClick: z
         .boolean()
         .optional()
@@ -49,7 +59,17 @@ export const ActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("type"),
       ref: z
         .string()
+        .optional()
         .describe("The 'ref' ID of the input element to type into"),
+      role: z
+        .string()
+        .optional()
+        .describe("The ARIA role of the input element"),
+      name: z
+        .string()
+        .optional()
+        .describe("The accessible name of the input element"),
+      nth: z.number().optional().describe("The index if multiple match"),
       text: z
         .string()
         .optional()
@@ -95,7 +115,19 @@ export const ActionSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("hover"),
-      ref: z.string().describe("The 'ref' ID of the element to hover over"),
+      ref: z
+        .string()
+        .optional()
+        .describe("The 'ref' ID of the element to hover over"),
+      role: z
+        .string()
+        .optional()
+        .describe("The ARIA role of the element to hover over"),
+      name: z
+        .string()
+        .optional()
+        .describe("The accessible name of the element to hover over"),
+      nth: z.number().optional().describe("The index if multiple match"),
       timeoutMs: z
         .number()
         .optional()
@@ -110,7 +142,17 @@ export const ActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("scrollIntoView"),
       ref: z
         .string()
+        .optional()
         .describe("The 'ref' ID of the element to scroll into the viewport"),
+      role: z
+        .string()
+        .optional()
+        .describe("The ARIA role of the element to scroll"),
+      name: z
+        .string()
+        .optional()
+        .describe("The accessible name of the element to scroll"),
+      nth: z.number().optional().describe("The index if multiple match"),
       timeoutMs: z
         .number()
         .optional()
@@ -127,8 +169,30 @@ export const ActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("drag"),
       startRef: z
         .string()
+        .optional()
         .describe("The 'ref' ID of the element to start dragging from"),
-      endRef: z.string().describe("The 'ref' ID of the element to drop onto"),
+      startRole: z
+        .string()
+        .optional()
+        .describe("The ARIA role of the element to start dragging from"),
+      startName: z
+        .string()
+        .optional()
+        .describe("The accessible name of the element to start dragging from"),
+      startNth: z.number().optional().describe("The index if multiple match"),
+      endRef: z
+        .string()
+        .optional()
+        .describe("The 'ref' ID of the element to drop onto"),
+      endRole: z
+        .string()
+        .optional()
+        .describe("The ARIA role of the element to drop onto"),
+      endName: z
+        .string()
+        .optional()
+        .describe("The accessible name of the element to drop onto"),
+      endNth: z.number().optional().describe("The index if multiple match"),
       timeoutMs: z
         .number()
         .optional()
@@ -143,7 +207,19 @@ export const ActionSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("select"),
-      ref: z.string().describe("The 'ref' ID of the <select> element"),
+      ref: z
+        .string()
+        .optional()
+        .describe("The 'ref' ID of the <select> element"),
+      role: z
+        .string()
+        .optional()
+        .describe("The ARIA role of the <select> element"),
+      name: z
+        .string()
+        .optional()
+        .describe("The accessible name of the <select> element"),
+      nth: z.number().optional().describe("The index if multiple match"),
       values: z
         .array(z.string())
         .describe("The exact string values of the <option> elements to select"),
@@ -164,7 +240,19 @@ export const ActionSchema = z.discriminatedUnion("kind", [
       fields: z
         .array(
           z.object({
-            ref: z.string().describe("The 'ref' ID of the form field"),
+            ref: z
+              .string()
+              .optional()
+              .describe("The 'ref' ID of the form field"),
+            role: z
+              .string()
+              .optional()
+              .describe("The ARIA role of the form field"),
+            name: z
+              .string()
+              .optional()
+              .describe("The accessible name of the form field"),
+            nth: z.number().optional().describe("The index if multiple match"),
             type: z
               .string()
               .describe("The type of the field, usually 'textbox' or similar"),
@@ -235,6 +323,9 @@ export const ActionSchema = z.discriminatedUnion("kind", [
         .describe(
           "If provided, the element matching the ref is passed as the first argument to the evaluated function",
         ),
+      role: z.string().optional(),
+      name: z.string().optional(),
+      nth: z.number().optional(),
       timeoutMs: z
         .number()
         .optional()
@@ -289,6 +380,9 @@ export const ActionSchema = z.discriminatedUnion("kind", [
         .describe(
           "If provided, takes a cropped screenshot of only the specific DOM element matching this ref (e.g., 'e12')",
         ),
+      role: z.string().optional(),
+      elementName: z.string().optional(),
+      nth: z.number().optional(),
       fullPage: z
         .boolean()
         .optional()
@@ -306,13 +400,18 @@ export type Action = z.infer<typeof ActionSchema>;
 export const AssertionSchema = z.object({
   ref: z
     .string()
+    .optional()
     .describe("The 'ref' ID of the element to assert on, if applicable"),
+  role: z.string().optional().describe("The ARIA role to assert on"),
+  name: z.string().optional().describe("The accessible name to assert on"),
+  nth: z.number().optional().describe("The index if multiple elements match"),
   type: z
     .enum([
       "isVisible",
       "isHidden",
       "textContains",
       "textEquals",
+      "inputValueEquals",
       "hasClass",
       "hasAttribute",
     ])

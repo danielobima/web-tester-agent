@@ -4,7 +4,7 @@ import { ActionSchema, Action, Assertion } from "./actions";
 import { TestSerializer, TestStep } from "./recorder";
 import * as path from "path";
 
-async function evaluateAssertions(
+export async function evaluateAssertions(
   assertions: Assertion[],
   browser: BrowserManager,
   refs: Record<string, any>,
@@ -13,32 +13,21 @@ async function evaluateAssertions(
 
   for (const assertion of assertions) {
     console.log(
-      `[Replay] Evaluating assertion: ${assertion.type} on ref ${assertion.ref}`,
+      `[Assert] Evaluating assertion: ${assertion.type} on ref ${assertion.ref || assertion.role}`,
     );
     let locator;
+    if (assertion.role || assertion.ref) {
+      locator = await browser.getLocator(assertion);
+    }
 
-    if (assertion.ref && refs[assertion.ref]) {
-      locator = await browser.getLocatorByRef(assertion.ref, refs);
-    } else if (assertion.ref && !refs[assertion.ref]) {
+    if (!locator) {
       if (assertion.type === "isHidden") {
         console.log(
-          `[Replay] Assertion passed: ref '${assertion.ref}' is entirely absent from the DOM.`,
+          `[Assert] Assertion passed: target is entirely absent from the DOM.`,
         );
-        continue; // Implicitly hidden/removed!
+        continue;
       }
-      throw new Error(
-        `Assertion failed: Could not resolve ref '${assertion.ref}' in the current accessibility tree.`,
-      );
-    }
-
-    if (!locator && assertion.ref) {
-      throw new Error(
-        `Assertion failed: Locator not found for ref '${assertion.ref}'`,
-      );
-    }
-
-    // Default to the body/root if no ref is provided (e.g. for general textContains on the page)
-    if (!locator) {
+      // Default to the body/root if no role/ref is provided
       locator = browser.page.locator("body");
     }
 
@@ -69,6 +58,16 @@ async function evaluateAssertions(
           if (exactText?.trim() !== assertion.value) {
             throw new Error(
               `Expected exact text '${assertion.value}', got '${exactText?.trim()}'`,
+            );
+          }
+          break;
+        case "inputValueEquals":
+          if (!assertion.value)
+            throw new Error("Assertion 'inputValueEquals' requires a value.");
+          const inputValue = await locator.inputValue();
+          if (inputValue !== assertion.value) {
+            throw new Error(
+              `Expected input value '${assertion.value}', got '${inputValue}'`,
             );
           }
           break;
@@ -156,6 +155,7 @@ export async function replayTest(
   browser: BrowserManager,
   model: LanguageModel,
   artifactsDir?: string,
+  skipAssertions?: boolean,
 ) {
   const serializer = new TestSerializer();
   const test = await serializer.loadTest(filePath);
@@ -187,7 +187,11 @@ export async function replayTest(
       await browser.waitForStability();
       const { refs } = await browser.getSnapshotForLLM(true);
 
-      if (step.assertions && step.assertions.length > 0) {
+      if (skipAssertions) {
+        console.log(
+          `[Replay] Skipping assertions (--skip-assertions is enabled).`,
+        );
+      } else if (step.assertions && step.assertions.length > 0) {
         await evaluateAssertions(step.assertions, browser, refs);
       } else {
         console.log(`[Replay] No assertions to evaluate for this step.`);
@@ -236,5 +240,5 @@ export async function replayTest(
   }
 
   console.log(`[Replay] Saving updated test spec to ${filePath}`);
-  await serializer.saveTest(filePath); // Save any healing changes
+  await serializer.saveTest(filePath.replace(".json", "-healed.json")); // Save any healing changes
 }

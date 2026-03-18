@@ -19,17 +19,42 @@ export function bumpDownloadArmId(): number {
   return nextDownloadArmId;
 }
 
-export function requireRef(value: unknown): string {
-  const raw = typeof value === "string" ? value.trim() : "";
-  const roleRef = raw ? parseRoleRef(raw) : null;
-  const ref = roleRef ?? (raw.startsWith("@") ? raw.slice(1) : raw);
-  if (!ref) {
-    throw new Error("ref is required");
+export function requireRefOrRole(opts: {
+  ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
+}): { ref?: string; role?: string; name?: string; nth?: number } {
+  const rawRef = typeof opts.ref === "string" ? opts.ref.trim() : "";
+  const roleRef = rawRef ? parseRoleRef(rawRef) : null;
+  const ref = roleRef ?? (rawRef.startsWith("@") ? rawRef.slice(1) : rawRef);
+
+  if (!ref && !opts.role) {
+    throw new Error("ref or role is required");
   }
-  return ref;
+
+  return { ...opts, ref: ref || undefined };
 }
 
-export function normalizeTimeoutMs(timeoutMs: number | undefined, fallback: number) {
+export function formatRefForError(opts: {
+  ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
+}): string {
+  if (opts.role) {
+    let s = `role=${opts.role}`;
+    if (opts.name) s += ` name="${opts.name}"`;
+    if (opts.nth !== undefined) s += ` nth=${opts.nth}`;
+    return s;
+  }
+  return opts.ref || "unknown";
+}
+
+export function normalizeTimeoutMs(
+  timeoutMs: number | undefined,
+  fallback: number,
+) {
   return Math.max(500, Math.min(120_000, timeoutMs ?? fallback));
 }
 

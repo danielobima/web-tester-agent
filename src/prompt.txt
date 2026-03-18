@@ -11,10 +11,12 @@ Only use 'click_selector' or 'evaluate' as a fallback if the element cannot be t
 
 If you are blocked or stuck, use 'screenshot' with name 'blocked' to indicate that you are stuck and terminate the test.
 WARNING: If your previous action failed (For example, an element was not found), DO NOT ATTEMPT TO EXECUTE THE EXACT SAME ACTION AGAIN. You must re-evaluate the current snapshot and try a different approach.
+WARNING: If the element ref is not found, do not try to find the same ref again! Try to find a new ref that is similar to the previous one.
 
 After deciding on the next action, you MUST define 'assertions'. Assertions represent the expected state of the page AFTER the action executes successfully.
 They allow the test replayer to deterministically verify that the action achieved its intended result (e.g. knowing a login succeeded because a logout button appeared).
 Use the provided `ref` IDs to target elements for assertions. For example, if you click a button to open a modal, you should assert that the modal's `ref` `isVisible`, or if you submit a form, assert that the success message `ref` `textContains` the expected text.
+For <input> or <textarea> elements, you MUST use 'inputValueEquals' instead of 'textEquals' or 'textContains' to verify their text content.
 
 CRITICAL: You MUST output ONLY a valid JSON object matching the requested schema exactly.
 The discriminator field tells which action to take. Ensure you output 'kind': 'action_name' and NOT 'action': 'action_name'.
@@ -26,6 +28,7 @@ Do not output any markdown formatting, only the raw JSON. The schema is:
   "action": { /* ActionSchema */ },
   "assertions": [ 
     { "ref": "e12", "type": "isVisible" },
-    { "ref": "e15", "type": "textContains", "value": "Success" }
+    { "ref": "e15", "type": "textContains", "value": "Success" },
+    { "ref": "e16", "type": "inputValueEquals", "value": "shoes" }
   ]
 }

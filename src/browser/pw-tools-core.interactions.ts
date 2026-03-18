@@ -7,14 +7,18 @@ import {
 } from "./pw-session";
 import {
   normalizeTimeoutMs,
-  requireRef,
+  requireRefOrRole,
+  formatRefForError,
   toAIFriendlyError,
 } from "./pw-tools-core.shared";
 
 export async function highlightViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
-  ref: string;
+  ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
 }): Promise<void> {
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
@@ -23,18 +27,21 @@ export async function highlightViaPlaywright(opts: {
     targetId: opts.targetId,
     page,
   });
-  const ref = requireRef(opts.ref);
+  const refOpts = requireRefOrRole(opts);
   try {
-    await refLocator(page, ref).highlight();
+    await refLocator(page, refOpts).highlight();
   } catch (err) {
-    throw toAIFriendlyError(err, ref);
+    throw toAIFriendlyError(err, formatRefForError(refOpts));
   }
 }
 
 export async function clickViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
-  ref: string;
+  ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
   doubleClick?: boolean;
   button?: "left" | "right" | "middle";
   modifiers?: Array<"Alt" | "Control" | "ControlOrMeta" | "Meta" | "Shift">;
@@ -50,8 +57,8 @@ export async function clickViaPlaywright(opts: {
     targetId: opts.targetId,
     page,
   });
-  const ref = requireRef(opts.ref);
-  const locator = refLocator(page, ref);
+  const refOpts = requireRefOrRole(opts);
+  const locator = refLocator(page, refOpts);
   const timeout = Math.max(
     500,
     Math.min(60_000, Math.floor(opts.timeoutMs ?? 8000)),
@@ -78,17 +85,20 @@ export async function clickViaPlaywright(opts: {
       // ignore
     }
   } catch (err) {
-    throw toAIFriendlyError(err, ref);
+    throw toAIFriendlyError(err, formatRefForError(refOpts));
   }
 }
 
 export async function hoverViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
-  ref: string;
+  ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
   timeoutMs?: number;
 }): Promise<void> {
-  const ref = requireRef(opts.ref);
+  const refOpts = requireRefOrRole(opts);
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
   restoreRoleRefsForTarget({
@@ -97,26 +107,39 @@ export async function hoverViaPlaywright(opts: {
     page,
   });
   try {
-    await refLocator(page, ref).hover({
+    await refLocator(page, refOpts).hover({
       timeout: Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000)),
     });
   } catch (err) {
-    throw toAIFriendlyError(err, ref);
+    throw toAIFriendlyError(err, formatRefForError(refOpts));
   }
 }
 
 export async function dragViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
-  startRef: string;
-  endRef: string;
+  startRef?: string;
+  startRole?: string;
+  startName?: string;
+  startNth?: number;
+  endRef?: string;
+  endRole?: string;
+  endName?: string;
+  endNth?: number;
   timeoutMs?: number;
 }): Promise<void> {
-  const startRef = requireRef(opts.startRef);
-  const endRef = requireRef(opts.endRef);
-  if (!startRef || !endRef) {
-    throw new Error("startRef and endRef are required");
-  }
+  const startRefOpts = requireRefOrRole({
+    ref: opts.startRef,
+    role: opts.startRole,
+    name: opts.startName,
+    nth: opts.startNth,
+  });
+  const endRefOpts = requireRefOrRole({
+    ref: opts.endRef,
+    role: opts.endRole,
+    name: opts.endName,
+    nth: opts.endNth,
+  });
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
   restoreRoleRefsForTarget({
@@ -125,22 +148,28 @@ export async function dragViaPlaywright(opts: {
     page,
   });
   try {
-    await refLocator(page, startRef).dragTo(refLocator(page, endRef), {
+    await refLocator(page, startRefOpts).dragTo(refLocator(page, endRefOpts), {
       timeout: Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000)),
     });
   } catch (err) {
-    throw toAIFriendlyError(err, `${startRef} -> ${endRef}`);
+    throw toAIFriendlyError(
+      err,
+      `${formatRefForError(startRefOpts)} -> ${formatRefForError(endRefOpts)}`,
+    );
   }
 }
 
 export async function selectOptionViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
-  ref: string;
+  ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
   values: string[];
   timeoutMs?: number;
 }): Promise<void> {
-  const ref = requireRef(opts.ref);
+  const refOpts = requireRefOrRole(opts);
   if (!opts.values?.length) {
     throw new Error("values are required");
   }
@@ -152,11 +181,11 @@ export async function selectOptionViaPlaywright(opts: {
     page,
   });
   try {
-    await refLocator(page, ref).selectOption(opts.values, {
+    await refLocator(page, refOpts).selectOption(opts.values, {
       timeout: Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000)),
     });
   } catch (err) {
-    throw toAIFriendlyError(err, ref);
+    throw toAIFriendlyError(err, formatRefForError(refOpts));
   }
 }
 
@@ -180,7 +209,10 @@ export async function pressKeyViaPlaywright(opts: {
 export async function typeViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
-  ref: string;
+  ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
   text: string;
   submit?: boolean;
   slowly?: boolean;
@@ -194,8 +226,8 @@ export async function typeViaPlaywright(opts: {
     targetId: opts.targetId,
     page,
   });
-  const ref = requireRef(opts.ref);
-  const locator = refLocator(page, ref);
+  const refOpts = requireRefOrRole(opts);
+  const locator = refLocator(page, refOpts);
   const timeout = Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000));
   try {
     if (opts.slowly) {
@@ -208,7 +240,7 @@ export async function typeViaPlaywright(opts: {
       await locator.press("Enter", { timeout });
     }
   } catch (err) {
-    throw toAIFriendlyError(err, ref);
+    throw toAIFriendlyError(err, formatRefForError(refOpts));
   }
 }
 
@@ -227,8 +259,8 @@ export async function fillFormViaPlaywright(opts: {
   });
   const timeout = Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000));
   for (const field of opts.fields) {
-    const ref = field.ref.trim();
-    const type = field.type.trim();
+    const refOpts = field.role ? field : requireRefOrRole({ ref: field.ref });
+    const type = field.type?.trim();
     const rawValue = field.value;
     const value =
       typeof rawValue === "string"
@@ -236,10 +268,10 @@ export async function fillFormViaPlaywright(opts: {
         : typeof rawValue === "number" || typeof rawValue === "boolean"
           ? String(rawValue)
           : "";
-    if (!ref || !type) {
+    if ((!refOpts.ref && !refOpts.role) || !type) {
       continue;
     }
-    const locator = refLocator(page, ref);
+    const locator = refLocator(page, refOpts);
     if (type === "checkbox" || type === "radio") {
       const checked =
         rawValue === true ||
@@ -249,14 +281,14 @@ export async function fillFormViaPlaywright(opts: {
       try {
         await locator.setChecked(checked, { timeout });
       } catch (err) {
-        throw toAIFriendlyError(err, ref);
+        throw toAIFriendlyError(err, formatRefForError(refOpts));
       }
       continue;
     }
     try {
       await locator.fill(value, { timeout });
     } catch (err) {
-      throw toAIFriendlyError(err, ref);
+      throw toAIFriendlyError(err, formatRefForError(refOpts));
     }
   }
 }
@@ -266,6 +298,9 @@ export async function evaluateViaPlaywright(opts: {
   targetId?: string;
   fn: string;
   ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
 }): Promise<unknown> {
@@ -329,8 +364,8 @@ export async function evaluateViaPlaywright(opts: {
   }
 
   try {
-    if (opts.ref) {
-      const locator = refLocator(page, opts.ref);
+    if (opts.ref || opts.role) {
+      const locator = refLocator(page, opts);
       // eslint-disable-next-line @typescript-eslint/no-implied-eval -- required for browser-context eval
       const elementEvaluator = new Function(
         "el",
@@ -421,7 +456,10 @@ export async function evaluateViaPlaywright(opts: {
 export async function scrollIntoViewViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
-  ref: string;
+  ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
   timeoutMs?: number;
 }): Promise<void> {
   const page = await getPageForTargetId(opts);
@@ -433,12 +471,12 @@ export async function scrollIntoViewViaPlaywright(opts: {
   });
   const timeout = normalizeTimeoutMs(opts.timeoutMs, 20_000);
 
-  const ref = requireRef(opts.ref);
-  const locator = refLocator(page, ref);
+  const refOpts = requireRefOrRole(opts);
+  const locator = refLocator(page, refOpts);
   try {
     await locator.scrollIntoViewIfNeeded({ timeout });
   } catch (err) {
-    throw toAIFriendlyError(err, ref);
+    throw toAIFriendlyError(err, formatRefForError(refOpts));
   }
 }
 
@@ -503,6 +541,9 @@ export async function takeScreenshotViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
   ref?: string;
+  role?: string;
+  name?: string;
+  nth?: number;
   element?: string;
   fullPage?: boolean;
   type?: "png" | "jpeg";

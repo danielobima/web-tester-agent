@@ -5,6 +5,7 @@ import { TestSerializer } from "./recorder";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { z } from "zod";
+import { evaluateAssertions } from "./replay";
 
 export async function runAgent(
   requirement: string,
@@ -12,6 +13,7 @@ export async function runAgent(
   model: LanguageModel,
   serializer?: TestSerializer,
   artifactsDir?: string,
+  skipAssertions?: boolean,
 ) {
   const history: any[] = [];
   let stepCounter = 1;
@@ -105,12 +107,16 @@ export async function runAgent(
                 "A short sentence describing the result of the PREVIOUS action based on the current state. Leave empty on the first step.",
               ),
             action: ActionSchema,
-            assertions: z
-              .array(AssertionSchema)
-              .optional()
-              .describe(
-                "An array of assertions that MUST be true AFTER the action completes. Use this to deterministically verify the action succeeded during replay.",
-              ),
+            ...(skipAssertions
+              ? {}
+              : {
+                  assertions: z
+                    .array(AssertionSchema)
+                    .optional()
+                    .describe(
+                      "An array of assertions that MUST be true AFTER the action completes. Use this to deterministically verify the action succeeded during replay.",
+                    ),
+                }),
           }),
           system: systemPrompt,
           messages: [
@@ -143,7 +149,7 @@ export async function runAgent(
           `[Agent] Schema validation failed (Attempt ${retries}/${maxRetries}): ${e.message}`,
         );
         if (e.text) {
-          console.warn(`[Agent] Raw text: ${e.text}`);
+          console.warn(`[Agent] Raw text: ${e.text} ${e.message}`);
         }
 
         if (retries >= maxRetries) {
@@ -171,7 +177,53 @@ export async function runAgent(
       );
     }
 
-    console.log(`[Agent] Action elected:`, action);
+    // Transform all refs into role/name/nth before execution and serialization
+    const mapRefToRoleName = (obj: any) => {
+      if (obj.ref && refs[obj.ref]) {
+        obj.role = refs[obj.ref].role;
+        if (refs[obj.ref].name) obj.name = refs[obj.ref].name;
+        if (refs[obj.ref].nth !== undefined) obj.nth = refs[obj.ref].nth;
+        if (obj.kind === "screenshot") {
+          obj.elementName = obj.name;
+          delete obj.name;
+        }
+        delete obj.ref;
+      }
+    };
+
+    mapRefToRoleName(action);
+
+    if (action.kind === "drag") {
+      if (action.startRef && refs[action.startRef]) {
+        action.startRole = refs[action.startRef].role;
+        if (refs[action.startRef].name)
+          action.startName = refs[action.startRef].name;
+        if (refs[action.startRef].nth !== undefined)
+          action.startNth = refs[action.startRef].nth;
+        delete action.startRef;
+      }
+      if (action.endRef && refs[action.endRef]) {
+        action.endRole = refs[action.endRef].role;
+        if (refs[action.endRef].name) action.endName = refs[action.endRef].name;
+        if (refs[action.endRef].nth !== undefined)
+          action.endNth = refs[action.endRef].nth;
+        delete action.endRef;
+      }
+    }
+
+    if (action.kind === "fill" && Array.isArray(action.fields)) {
+      for (const field of action.fields) {
+        mapRefToRoleName(field);
+      }
+    }
+
+    if (Array.isArray(assertions)) {
+      for (const assertion of assertions) {
+        mapRefToRoleName(assertion);
+      }
+    }
+
+    console.log(`[Agent] Action elected & transformed:`, action);
 
     if (artifactsDir) {
       await fs.writeFile(
@@ -187,6 +239,13 @@ export async function runAgent(
         serializer.updatePreviousResult(actionResult);
       }
       await browser.execute(action);
+
+      if (!skipAssertions && assertions && assertions.length > 0) {
+        await browser.waitForStability();
+        const { refs: evalRefs } = await browser.getSnapshotForLLM(true);
+        await evaluateAssertions(assertions, browser, evalRefs);
+      }
+
       if (serializer) {
         serializer.logAction(action, {
           stateDescription,

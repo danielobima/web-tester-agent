@@ -135,10 +135,12 @@ export class BrowserManager {
     console.warn(`[Browser] Page did not stabilize within ${timeoutMs}ms`);
   }
 
-  // Helper to get a Playwright Locator from a string 'ref' and the refs mapping
-  async getLocatorByRef(ref: string, refs: Record<string, any>) {
+  // Helper to get a Playwright Locator from role/name/nth or a string 'ref'
+  async getLocator(
+    opts: string | { ref?: string; role?: string; name?: string; nth?: number },
+  ) {
     if (!this.page) throw new Error("Browser not initialized");
-    return refLocator(this.page, ref);
+    return refLocator(this.page, opts);
   }
 
   async execute(action: Action) {
@@ -170,6 +172,9 @@ export class BrowserManager {
         await clickViaPlaywright({
           ...baseOpts,
           ref: action.ref,
+          role: action.role,
+          name: action.name,
+          nth: action.nth,
           doubleClick: action.doubleClick,
           button: action.button,
           timeoutMs: action.timeoutMs,
@@ -180,6 +185,9 @@ export class BrowserManager {
         await typeViaPlaywright({
           ...baseOpts,
           ref: action.ref,
+          role: action.role,
+          name: action.name,
+          nth: action.nth,
           text: action.text ?? action.value ?? "",
           submit: action.submit,
           slowly: action.slowly,
@@ -199,6 +207,9 @@ export class BrowserManager {
         await hoverViaPlaywright({
           ...baseOpts,
           ref: action.ref,
+          role: action.role,
+          name: action.name,
+          nth: action.nth,
           timeoutMs: action.timeoutMs,
         });
         break;
@@ -207,6 +218,9 @@ export class BrowserManager {
         await scrollIntoViewViaPlaywright({
           ...baseOpts,
           ref: action.ref,
+          role: action.role,
+          name: action.name,
+          nth: action.nth,
           timeoutMs: action.timeoutMs,
         });
         break;
@@ -215,7 +229,13 @@ export class BrowserManager {
         await dragViaPlaywright({
           ...baseOpts,
           startRef: action.startRef,
+          startRole: action.startRole,
+          startName: action.startName,
+          startNth: action.startNth,
           endRef: action.endRef,
+          endRole: action.endRole,
+          endName: action.endName,
+          endNth: action.endNth,
           timeoutMs: action.timeoutMs,
         });
         break;
@@ -224,6 +244,9 @@ export class BrowserManager {
         await selectOptionViaPlaywright({
           ...baseOpts,
           ref: action.ref,
+          role: action.role,
+          name: action.name,
+          nth: action.nth,
           values: action.values,
           timeoutMs: action.timeoutMs,
         });
@@ -256,6 +279,9 @@ export class BrowserManager {
           ...baseOpts,
           fn: action.fn,
           ref: action.ref,
+          role: action.role,
+          name: action.name,
+          nth: action.nth,
           timeoutMs: action.timeoutMs,
         });
         break;
@@ -265,10 +291,13 @@ export class BrowserManager {
         break;
 
       case "screenshot":
-        if (action.ref) {
+        if (action.ref || action.role) {
           const result = await takeScreenshotViaPlaywright({
             ...baseOpts,
             ref: action.ref,
+            role: action.role,
+            name: action.elementName,
+            nth: action.nth,
             type: "jpeg",
           });
           const dest = path.join(

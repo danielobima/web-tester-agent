@@ -496,12 +496,37 @@ export async function getPageForTargetId(opts: {
   return found;
 }
 
-export function refLocator(page: Page, ref: string) {
-  const normalized = ref.startsWith("@")
-    ? ref.slice(1)
-    : ref.startsWith("ref=")
-      ? ref.slice(4)
-      : ref;
+export function refLocator(
+  page: Page,
+  refOrOpts:
+    | string
+    | { ref?: string; role?: string; name?: string; nth?: number },
+) {
+  const opts = typeof refOrOpts === "string" ? { ref: refOrOpts } : refOrOpts;
+
+  if (opts.role) {
+    const state = pageStates.get(page);
+    const scope = state?.roleRefsFrameSelector
+      ? page.frameLocator(state.roleRefsFrameSelector)
+      : page;
+    const locAny = scope as unknown as {
+      getByRole: (
+        role: never,
+        opts?: { name?: string; exact?: boolean },
+      ) => ReturnType<Page["getByRole"]>;
+    };
+    const locator = opts.name
+      ? locAny.getByRole(opts.role as never, { name: opts.name, exact: true })
+      : locAny.getByRole(opts.role as never);
+    return opts.nth !== undefined ? locator.nth(opts.nth) : locator;
+  }
+
+  const rawRef = opts.ref || "";
+  const normalized = rawRef.startsWith("@")
+    ? rawRef.slice(1)
+    : rawRef.startsWith("ref=")
+      ? rawRef.slice(4)
+      : rawRef;
 
   if (/^e\d+$/.test(normalized)) {
     const state = pageStates.get(page);

@@ -42,9 +42,11 @@ async function main() {
 
     if (command === "record") {
       const saveArtifacts = args.includes("--save-artifacts");
+      const skipAssertions = args.includes("--skip-assertions");
       const cleanArgs = args.filter(
         (a) =>
           a !== "--save-artifacts" &&
+          a !== "--skip-assertions" &&
           !a.startsWith("--provider=") &&
           !a.startsWith("--model="),
       );
@@ -74,7 +76,14 @@ async function main() {
       serializer.setOutPath(finalOutPath);
 
       await browser.execute({ kind: "navigate", url: startUrl });
-      await runAgent(goal, browser, model as any, serializer, artifactsDir);
+      await runAgent(
+        goal,
+        browser,
+        model as any,
+        serializer,
+        artifactsDir,
+        skipAssertions,
+      );
 
       const rawTest = serializer.getTest();
 
@@ -82,9 +91,11 @@ async function main() {
       console.log(`[CLI] Recording finished. Saved to ${finalOutPath}`);
     } else if (command === "replay") {
       const saveArtifacts = args.includes("--save-artifacts");
+      const skipAssertions = args.includes("--skip-assertions");
       const cleanArgs = args.filter(
         (a) =>
           a !== "--save-artifacts" &&
+          a !== "--skip-assertions" &&
           !a.startsWith("--provider=") &&
           !a.startsWith("--model="),
       );
@@ -97,7 +108,13 @@ async function main() {
         : undefined;
 
       console.log(`[CLI] Starting Replay Mode...`);
-      await replayTest(file, browser, model as any, artifactsDir);
+      await replayTest(
+        file,
+        browser,
+        model as any,
+        artifactsDir,
+        skipAssertions,
+      );
       console.log(`[CLI] Replay finished.`);
     } else {
       console.log("Unknown command. Use 'record' or 'replay'.");
