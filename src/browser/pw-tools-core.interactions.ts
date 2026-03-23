@@ -29,7 +29,7 @@ export async function highlightViaPlaywright(opts: {
   });
   const refOpts = requireRefOrRole(opts);
   try {
-    await refLocator(page, refOpts).highlight();
+    await (await refLocator(page, refOpts)).highlight();
   } catch (err) {
     throw toAIFriendlyError(err, formatRefForError(refOpts));
   }
@@ -58,7 +58,7 @@ export async function clickViaPlaywright(opts: {
     page,
   });
   const refOpts = requireRefOrRole(opts);
-  const locator = refLocator(page, refOpts);
+  const locator = await refLocator(page, refOpts);
   const timeout = Math.max(
     500,
     Math.min(60_000, Math.floor(opts.timeoutMs ?? 8000)),
@@ -71,10 +71,26 @@ export async function clickViaPlaywright(opts: {
         modifiers: opts.modifiers,
       });
     } else {
+      // Robustness: Focus before click for certain interactive roles
+      const info = opts.role
+        ? opts
+        : ((await refLocator(page, opts.ref || "")) as any)._info;
+      const role = opts.role || info?.role;
+      if (role === "combobox" || role === "listbox" || role === "searchbox") {
+        await locator.focus({ timeout: 2000 }).catch(() => {});
+      }
+
       await locator.click({
         timeout,
         button: opts.button,
         modifiers: opts.modifiers,
+        // Robustness: force click for options/radios that might be overlay-heavy
+        force:
+          role === "option" ||
+          role === "radio" ||
+          role === "menuitem" ||
+          role === "menuitemcheckbox" ||
+          role === "menuitemradio",
       });
     }
     // Add a small delay to allow DOM/Network to react to click
@@ -107,7 +123,9 @@ export async function hoverViaPlaywright(opts: {
     page,
   });
   try {
-    await refLocator(page, refOpts).hover({
+    await (
+      await refLocator(page, refOpts)
+    ).hover({
       timeout: Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000)),
     });
   } catch (err) {
@@ -148,7 +166,9 @@ export async function dragViaPlaywright(opts: {
     page,
   });
   try {
-    await refLocator(page, startRefOpts).dragTo(refLocator(page, endRefOpts), {
+    await (
+      await refLocator(page, startRefOpts)
+    ).dragTo(await refLocator(page, endRefOpts), {
       timeout: Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000)),
     });
   } catch (err) {
@@ -181,7 +201,9 @@ export async function selectOptionViaPlaywright(opts: {
     page,
   });
   try {
-    await refLocator(page, refOpts).selectOption(opts.values, {
+    await (
+      await refLocator(page, refOpts)
+    ).selectOption(opts.values, {
       timeout: Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000)),
     });
   } catch (err) {
@@ -227,7 +249,7 @@ export async function typeViaPlaywright(opts: {
     page,
   });
   const refOpts = requireRefOrRole(opts);
-  const locator = refLocator(page, refOpts);
+  const locator = await refLocator(page, refOpts);
   const timeout = Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000));
   try {
     if (opts.slowly) {
@@ -271,7 +293,7 @@ export async function fillFormViaPlaywright(opts: {
     if ((!refOpts.ref && !refOpts.role) || !type) {
       continue;
     }
-    const locator = refLocator(page, refOpts);
+    const locator = await refLocator(page, refOpts);
     if (type === "checkbox" || type === "radio") {
       const checked =
         rawValue === true ||
@@ -365,7 +387,7 @@ export async function evaluateViaPlaywright(opts: {
 
   try {
     if (opts.ref || opts.role) {
-      const locator = refLocator(page, opts);
+      const locator = await refLocator(page, opts);
       // eslint-disable-next-line @typescript-eslint/no-implied-eval -- required for browser-context eval
       const elementEvaluator = new Function(
         "el",
@@ -472,7 +494,7 @@ export async function scrollIntoViewViaPlaywright(opts: {
   const timeout = normalizeTimeoutMs(opts.timeoutMs, 20_000);
 
   const refOpts = requireRefOrRole(opts);
-  const locator = refLocator(page, refOpts);
+  const locator = await refLocator(page, refOpts);
   try {
     await locator.scrollIntoViewIfNeeded({ timeout });
   } catch (err) {
@@ -560,7 +582,7 @@ export async function takeScreenshotViaPlaywright(opts: {
     if (opts.fullPage) {
       throw new Error("fullPage is not supported for element screenshots");
     }
-    const locator = refLocator(page, opts.ref);
+    const locator = await refLocator(page, opts.ref);
     const buffer = await locator.screenshot({ type });
     return { buffer };
   }
@@ -622,7 +644,7 @@ export async function screenshotWithLabelsViaPlaywright(opts: {
       continue;
     }
     try {
-      const box = await refLocator(page, ref).boundingBox();
+      const box = await (await refLocator(page, ref)).boundingBox();
       if (!box) {
         skipped += 1;
         continue;
@@ -744,7 +766,7 @@ export async function setInputFilesViaPlaywright(opts: {
   }
 
   const locator = inputRef
-    ? refLocator(page, inputRef)
+    ? await refLocator(page, inputRef)
     : page.locator(element).first();
 
   try {

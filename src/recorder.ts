@@ -1,4 +1,4 @@
-import { Action, Assertion } from "./actions";
+import { Action, Assertion, Checklist, Task } from "./actions";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -15,7 +15,8 @@ export interface TestStep {
   stateDescription?: string;
   actionIntent?: string;
   actionResult?: string;
-  assertions?: Assertion[];
+  verificationAssertions?: Assertion[];
+  taskId?: string;
   healingHistory?: HealingRecord[];
   stateSnapshot?: string;
   axTree?: any;
@@ -25,6 +26,7 @@ export interface SerializedTest {
   id: string;
   name: string;
   startUrl: string;
+  checklist?: Checklist;
   steps: TestStep[];
   originalSteps?: TestStep[];
 }
@@ -54,7 +56,8 @@ export class TestSerializer {
       stateDescription?: string;
       actionIntent?: string;
       actionResult?: string;
-      assertions?: Assertion[];
+      verificationAssertions?: Assertion[];
+      taskId?: string;
       stateSnapshot?: string;
       axTree?: any;
     },
@@ -71,10 +74,23 @@ export class TestSerializer {
       stateDescription: options?.stateDescription,
       actionIntent: options?.actionIntent,
       actionResult: options?.actionResult,
-      assertions: options?.assertions,
+      verificationAssertions: options?.verificationAssertions,
+      taskId: options?.taskId,
       stateSnapshot: options?.stateSnapshot,
       axTree: options?.axTree,
     });
+  }
+
+  updateChecklist(checklist: Checklist) {
+    if (this.test) {
+      this.test.checklist = checklist;
+    }
+  }
+
+  logVerificationToLastStep(assertions: Assertion[]) {
+    if (!this.test || this.test.steps.length === 0) return;
+    this.test.steps[this.test.steps.length - 1].verificationAssertions =
+      assertions;
   }
 
   // Update the result of the strictly previous step
@@ -86,7 +102,11 @@ export class TestSerializer {
   async saveTest(filePath?: string) {
     if (!this.test) throw new Error("Test not started");
     const targetPath = filePath || this.activeOutPath;
-    if (!targetPath) return;
+    if (!targetPath) {
+      console.warn("[TestSerializer] No output path set, skipping save.");
+      return;
+    }
+    console.log(`[TestSerializer] Saving test to: ${targetPath}`);
     await fs.mkdir(path.dirname(targetPath), { recursive: true });
     await fs.writeFile(targetPath, JSON.stringify(this.test, null, 2), "utf-8");
   }

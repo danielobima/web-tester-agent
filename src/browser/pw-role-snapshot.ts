@@ -21,6 +21,8 @@ export type RoleSnapshotOptions = {
   maxDepth?: number;
   /** Remove unnamed structural elements and empty branches. */
   compact?: boolean;
+  /** Return the raw snapshot without attaching refs or stripping */
+  raw?: boolean;
 };
 
 const INTERACTIVE_ROLES = new Set([
@@ -262,7 +264,7 @@ function processLine(
   }
 
   const shouldHaveRef =
-    isInteractive || IMAGE_ROLES.has(role) || (isContent && name);
+    options.raw || isInteractive || IMAGE_ROLES.has(role) || (isContent && name);
   if (!shouldHaveRef) {
     return line;
   }

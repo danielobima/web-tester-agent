@@ -496,7 +496,7 @@ export async function getPageForTargetId(opts: {
   return found;
 }
 
-export function refLocator(
+export async function refLocator(
   page: Page,
   refOrOpts:
     | string
@@ -504,21 +504,38 @@ export function refLocator(
 ) {
   const opts = typeof refOrOpts === "string" ? { ref: refOrOpts } : refOrOpts;
 
-  if (opts.role) {
-    const state = pageStates.get(page);
-    const scope = state?.roleRefsFrameSelector
-      ? page.frameLocator(state.roleRefsFrameSelector)
-      : page;
+  const state = pageStates.get(page);
+  const scope = state?.roleRefsFrameSelector
+    ? page.frameLocator(state.roleRefsFrameSelector)
+    : page;
+
+  const getTieredRoleLocator = async (
+    role: string,
+    name?: string,
+    nth?: number,
+  ) => {
     const locAny = scope as unknown as {
       getByRole: (
         role: never,
         opts?: { name?: string; exact?: boolean },
       ) => ReturnType<Page["getByRole"]>;
     };
-    const locator = opts.name
-      ? locAny.getByRole(opts.role as never, { name: opts.name, exact: true })
-      : locAny.getByRole(opts.role as never);
-    return opts.nth !== undefined ? locator.nth(opts.nth) : locator;
+
+    if (name) {
+      const strict = locAny.getByRole(role as never, { name, exact: true });
+      if ((await strict.count()) > 0) {
+        return nth !== undefined ? strict.nth(nth) : strict;
+      }
+      const flexible = locAny.getByRole(role as never, { name, exact: false });
+      return nth !== undefined ? flexible.nth(nth) : flexible;
+    }
+
+    const locator = locAny.getByRole(role as never);
+    return nth !== undefined ? locator.nth(nth) : locator;
+  };
+
+  if (opts.role) {
+    return await getTieredRoleLocator(opts.role, opts.name, opts.nth);
   }
 
   const rawRef = opts.ref || "";
@@ -529,11 +546,7 @@ export function refLocator(
       : rawRef;
 
   if (/^e\d+$/.test(normalized)) {
-    const state = pageStates.get(page);
     if (state?.roleRefsMode === "aria") {
-      const scope = state.roleRefsFrameSelector
-        ? page.frameLocator(state.roleRefsFrameSelector)
-        : page;
       return scope.locator(`aria-ref=${normalized}`);
     }
     const info = state?.roleRefs?.[normalized];
@@ -542,22 +555,10 @@ export function refLocator(
         `Unknown ref "${normalized}". Run a new snapshot and use a ref from that snapshot.`,
       );
     }
-    const scope = state?.roleRefsFrameSelector
-      ? page.frameLocator(state.roleRefsFrameSelector)
-      : page;
-    const locAny = scope as unknown as {
-      getByRole: (
-        role: never,
-        opts?: { name?: string; exact?: boolean },
-      ) => ReturnType<Page["getByRole"]>;
-    };
-    const locator = info.name
-      ? locAny.getByRole(info.role as never, { name: info.name, exact: true })
-      : locAny.getByRole(info.role as never);
-    return info.nth !== undefined ? locator.nth(info.nth) : locator;
+    return await getTieredRoleLocator(info.role, info.name, info.nth);
   }
 
-  return page.locator(`aria-ref=${normalized}`);
+  return scope.locator(`aria-ref=${normalized}`);
 }
 
 export async function closePlaywrightBrowserConnection(): Promise<void> {

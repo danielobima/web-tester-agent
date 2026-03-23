@@ -1,11 +1,78 @@
 import { generateObject, type LanguageModel } from "ai";
 import { BrowserManager } from "./browser";
-import { ActionSchema, AssertionSchema } from "./actions";
+import {
+  ChecklistSchema,
+  ExecutionResponseSchema,
+  AssertionAgentResponseSchema,
+  type Checklist,
+  type ExecutionResponse,
+  type AssertionAgentResponse,
+} from "./actions";
 import { TestSerializer } from "./recorder";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { z } from "zod";
 import { evaluateAssertions } from "./replay";
+
+/**
+ * Transforms element references (ref IDs) into role/name/nth identifiers
+ * that can be used for deterministic replay.
+ */
+function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
+  if (!obj) return;
+
+  const map = (target: any) => {
+    if (target && target.ref && refs[target.ref]) {
+      const refData = refs[target.ref];
+      target.role = refData.role;
+      if (refData.name) target.name = refData.name;
+      if (refData.nth !== undefined) target.nth = refData.nth;
+
+      // Special case for screenshot elements
+      if (target.kind === "screenshot") {
+        target.elementName = target.name;
+        delete target.name;
+      }
+      delete target.ref;
+    }
+  };
+
+  map(obj);
+
+  // Handle nested structures
+  if (obj.kind === "drag") {
+    if (obj.startRef) {
+      const startRefData = refs[obj.startRef];
+      if (startRefData) {
+        obj.startRole = startRefData.role;
+        if (startRefData.name) obj.startName = startRefData.name;
+        if (startRefData.nth !== undefined) obj.startNth = startRefData.nth;
+      }
+      delete obj.startRef;
+    }
+    if (obj.endRef) {
+      const endRefData = refs[obj.endRef];
+      if (endRefData) {
+        obj.endRole = endRefData.role;
+        if (endRefData.name) obj.endName = endRefData.name;
+        if (endRefData.nth !== undefined) obj.endNth = endRefData.nth;
+      }
+      delete obj.endRef;
+    }
+  }
+
+  if (obj.kind === "fill" && Array.isArray(obj.fields)) {
+    for (const field of obj.fields) {
+      map(field);
+    }
+  }
+
+  if (Array.isArray(obj.assertions)) {
+    for (const assertion of obj.assertions) {
+      map(assertion);
+    }
+  }
+}
 
 export async function runAgent(
   requirement: string,
@@ -14,298 +81,521 @@ export async function runAgent(
   serializer?: TestSerializer,
   artifactsDir?: string,
   skipAssertions?: boolean,
+  fullSnapshot?: boolean,
 ) {
   const history: any[] = [];
   let stepCounter = 1;
+
+  let checklist: Checklist = {
+    currentStateDescription: "Starting test execution",
+    tasks: [],
+    isGoalAchieved: false,
+  };
 
   if (artifactsDir) {
     await fs.mkdir(artifactsDir, { recursive: true });
     console.log(`[Agent] Saving artifacts to ${artifactsDir}`);
   }
 
-  console.log(`[Agent] Starting goal: "${requirement}"`);
-
-  let previousSnapshot = "";
-  let lastActionString = "";
-  let consecutiveSameAction = 0;
-
-  const systemPrompt = await fs.readFile(
-    path.join(__dirname, "prompt.txt"),
+  const planningPrompt = await fs.readFile(
+    path.join(__dirname, "prompts", "planning.txt"),
+    "utf-8",
+  );
+  const executionPromptTemplate = await fs.readFile(
+    path.join(__dirname, "prompts", "execution.txt"),
+    "utf-8",
+  );
+  const assertionPromptTemplate = await fs.readFile(
+    path.join(__dirname, "prompts", "assertion.txt"),
     "utf-8",
   );
 
-  while (true) {
-    // 1. Observe
-    await browser.waitForStability();
-    const { text: snapshot, axTree, refs } = await browser.getSnapshotForLLM();
-    console.log(`[Agent] Acquired snapshot (${snapshot.length} chars)`);
+  console.log(`[Agent] Starting goal: "${requirement}"`);
 
-    if (artifactsDir) {
-      await fs.writeFile(
-        path.join(artifactsDir, `step-${stepCounter}-snapshot.txt`),
-        snapshot,
-        "utf-8",
-      );
-      if (axTree) {
-        await fs.writeFile(
-          path.join(artifactsDir, `step-${stepCounter}-axtree.json`),
-          JSON.stringify(axTree, null, 2),
-          "utf-8",
+  let lastActionString = "";
+  let consecutiveSameAction = 0;
+
+  let currentTaskBeforeSnapshot: string = "";
+  let currentTaskBeforeUrl: string = "";
+  let currentTaskBeforeScreenshot: Buffer | undefined = undefined;
+  let lastTaskId: string | undefined = undefined;
+
+  try {
+    while (stepCounter < 50) {
+      // 1. Observe
+      await browser.waitForStability();
+      const {
+        text: snapshot,
+        axTree,
+        refs,
+      } = await browser.getSnapshotForLLM(false, false, fullSnapshot);
+      const currentUrl = browser.page?.url() || "";
+      const screenshot = await browser.page?.screenshot({
+        type: "jpeg",
+        quality: 80,
+      });
+
+      console.log(`[Agent] Acquired snapshot (${snapshot.length} chars)`);
+
+      if (artifactsDir) {
+        await saveStepArtifacts(
+          artifactsDir,
+          stepCounter,
+          snapshot,
+          axTree,
+          refs,
+          browser,
+          history,
+          checklist,
         );
       }
-      await fs.writeFile(
-        path.join(artifactsDir, `step-${stepCounter}-refs.json`),
-        JSON.stringify(refs, null, 2),
-        "utf-8",
-      );
 
-      // Save screenshot
-      if (browser.page) {
-        await browser.page.screenshot({
-          path: path.join(artifactsDir, `step-${stepCounter}-screenshot.png`),
-          fullPage: false,
-        });
-      }
-
-      await fs.writeFile(
-        path.join(artifactsDir, `step-${stepCounter}-history.json`),
-        JSON.stringify(history, null, 2),
-        "utf-8",
-      );
-    }
-
-    // 2. Decide (Call LLM)
-    console.log(`[Agent] Thinking...`);
-    let action;
-    let stateDescription: string | undefined;
-    let actionIntent: string | undefined;
-    let actionResult: string | undefined;
-    let assertions: any | undefined;
-
-    let retries = 0;
-    const maxRetries = 3;
-
-    while (retries < maxRetries) {
+      // 2. Planning Step
+      console.log(`[Agent][Planner] Planning...`);
       try {
-        const result = await generateObject({
+        const planningResult = await generateObject({
           model: model,
-          schema: z.object({
-            currentStateDescription: z
-              .string()
-              .describe(
-                "A short sentence describing the current state of the page",
-              ),
-            intendedActionDescription: z
-              .string()
-              .describe(
-                "A short sentence describing the action you will attempt next",
-              ),
-            previousActionResult: z
-              .string()
-              .optional()
-              .describe(
-                "A short sentence describing the result of the PREVIOUS action based on the current state. Leave empty on the first step.",
-              ),
-            action: ActionSchema,
-            ...(skipAssertions
-              ? {}
-              : {
-                  assertions: z
-                    .array(AssertionSchema)
-                    .optional()
-                    .describe(
-                      "An array of assertions that MUST be true AFTER the action completes. Use this to deterministically verify the action succeeded during replay.",
-                    ),
-                }),
-          }),
-          system: systemPrompt,
+          schema: ChecklistSchema,
+          system: planningPrompt,
           messages: [
             ...history,
             {
               role: "user",
-              content: `Goal: ${requirement}\n\nCurrent State:\n${snapshot}${
-                snapshot === previousSnapshot
-                  ? "\n\nWARNING: The page state has NOT changed since your last action! Stop repeating the exact same action and try a different approach."
-                  : ""
-              }${
-                consecutiveSameAction > 0
-                  ? "\n\nCRITICAL WARNING: You have proposed the exact same action that just failed! DO NOT REPEAT YOURSELF. You MUST choose a different `ref` or use a fallback method like `evaluate`."
-                  : ""
-              }`,
+              content: [
+                {
+                  type: "text",
+                  text: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(
+                    checklist,
+                    null,
+                    2,
+                  )}\n\nCurrent State:\n${snapshot}`,
+                },
+                ...(screenshot
+                  ? [
+                      {
+                        type: "image" as const,
+                        image: screenshot,
+                      },
+                    ]
+                  : []),
+              ],
             },
           ],
         });
-
-        const response = result.object;
-        action = response.action;
-        stateDescription = response.currentStateDescription;
-        actionIntent = response.intendedActionDescription;
-        actionResult = response.previousActionResult;
-        assertions = response.assertions;
-        break; // Success, exit retry loop
-      } catch (e: any) {
-        retries++;
-        console.warn(
-          `[Agent] Schema validation failed (Attempt ${retries}/${maxRetries}): ${e.message}`,
+        checklist = planningResult.object;
+        if (serializer) {
+          serializer.updateChecklist(checklist);
+        }
+        console.log(
+          `[Agent][Planner] Checklist updated (${checklist.tasks.length} tasks):`,
+          checklist.nextTaskId,
         );
-        if (e.text) {
-          console.warn(`[Agent] Raw text: ${e.text} ${e.message}`);
-        }
+        console.log("[Agent][Planner] Tasks:");
+        console.log(
+          checklist.tasks
+            .map(
+              (t) =>
+                `\t${t.id === checklist.nextTaskId ? "-" : t.status === "completed" ? "✓" : "✗"} ${t.id}: ${t.description}`,
+            )
+            .join("\n"),
+        );
+      } catch (e: any) {
+        console.error(`[Agent][Planner] Planning failed: ${e.message}`);
+        // Fallback: If planning fails, try to continue with current checklist if possible
+      }
 
-        if (retries >= maxRetries) {
-          console.error(
-            `[Agent] Failed to generate valid object after ${maxRetries} attempts.`,
+      if (checklist.isGoalAchieved) {
+        console.log(`[Agent][Planner] Success condition met. Goal achieved.`);
+        break;
+      }
+
+      const currentTaskId = checklist.nextTaskId;
+      const currentTask = checklist.tasks.find((t) => t.id === currentTaskId);
+
+      if (!currentTaskId || !currentTask) {
+        console.error(
+          `[Agent][Planner] No valid nextTaskId found. Terminating.`,
+        );
+        break;
+      }
+
+      // Check if task changed, update "before" markers
+      if (checklist.nextTaskId !== lastTaskId) {
+        currentTaskBeforeSnapshot = snapshot;
+        currentTaskBeforeUrl = currentUrl;
+        currentTaskBeforeScreenshot = screenshot;
+        browser.networkLogs = []; // Reset logs for the new task
+        lastTaskId = checklist.nextTaskId;
+        console.log(
+          `[Agent][Asserter] Tracked "before" state for task: ${currentTaskId}`,
+        );
+      }
+
+      // 3. Execution Step
+      console.log(
+        `[Agent][Executor] Thinking (Task: ${currentTask.description})...`,
+      );
+
+      const executionPrompt = executionPromptTemplate
+        .replace("{taskDescription}", currentTask.description)
+        .replace("{overallGoal}", requirement);
+
+      let executionResponse: ExecutionResponse | undefined;
+      let retries = 0;
+      const maxRetries = 3;
+
+      while (retries < maxRetries) {
+        try {
+          const result = await generateObject({
+            model: model,
+            schema: ExecutionResponseSchema,
+            system: executionPrompt,
+            messages: [
+              ...history,
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: `Goal: ${requirement}\nTask: ${
+                      currentTask.description
+                    }\n\nCurrent State:\n${snapshot}${
+                      consecutiveSameAction > 0
+                        ? "\n\nWARNING: You are repeating an action that recently failed. Try a different approach."
+                        : ""
+                    }`,
+                  },
+                  ...(screenshot
+                    ? [
+                        {
+                          type: "image" as const,
+                          image: screenshot,
+                        },
+                      ]
+                    : []),
+                ],
+              },
+            ],
+          });
+          executionResponse = result.object;
+          break;
+        } catch (e: any) {
+          retries++;
+
+          let errorMessage = e.message;
+          // If it's a Zod-like validation error, try to extract more details
+          if (e.errors && Array.isArray(e.errors)) {
+            const details = e.errors
+              .map((err: any) => `- ${err.path.join(".")}: ${err.message}`)
+              .join("\n");
+            errorMessage = `Schema validation failed:\n${details}`;
+          } else if (errorMessage.includes("No object generated")) {
+            // Sometimes the error is nested or just a generic string
+            // We'll try to use the message as is, but if we have e.cause we can check it
+            if (e.cause?.errors) {
+              const details = (e.cause.errors as any[])
+                .map((err: any) => `- ${err.path.join(".")}: ${err.message}`)
+                .join("\n");
+              errorMessage = `Schema validation failed:\n${details}`;
+            }
+          }
+
+          console.warn(
+            `[Agent][Executor] Execution schema validation failed (Attempt ${retries}/${maxRetries}): ${errorMessage}`,
           );
-          throw e; // Give up
+          if (e.text) {
+            console.warn(`[Agent][Executor] Raw text from model: ${e.text}`);
+          }
+
+          history.push({
+            role: "assistant",
+            content: e.text || JSON.stringify({ error: errorMessage }),
+          });
+          history.push({
+            role: "user",
+            content: `Your previous response failed schema validation. 
+
+ERROR:
+${errorMessage}
+
+Please review the ExecutionResponseSchema and correct your output. Common issues:
+1. Using 'kind': 'fill' but providing 'ref'/'value' directly instead of a 'fields' array.
+2. Using 'kind': 'type' but forgetting 'text' or 'value'.
+3. Using 'name' instead of 'kind' in the action object.`,
+          });
+
+          if (retries >= maxRetries) {
+            console.error(
+              `[Agent][Executor] Failed to generate valid execution object after ${maxRetries} attempts.`,
+            );
+            throw new Error(errorMessage);
+          }
+        }
+      }
+
+      if (!executionResponse) {
+        throw new Error(
+          `[Agent][Executor] Failed to generate a valid execution response.`,
+        );
+      }
+
+      const action = executionResponse.action;
+
+      mapRefsToIdentifiers(action, refs);
+
+      console.log(`[Agent][Executor] Action:`, action);
+
+      // 4. Act & Serialize
+      try {
+        if (serializer && executionResponse.previousActionResult) {
+          serializer.updatePreviousResult(
+            executionResponse.previousActionResult,
+          );
         }
 
-        // Feed the failure back into the history so the LLM learns to correct it
+        await browser.execute(action);
+
+        if (serializer) {
+          serializer.logAction(action, {
+            stateDescription: executionResponse.currentStateDescription,
+            actionIntent: executionResponse.intendedActionDescription,
+            taskId: currentTaskId,
+          });
+          await serializer.saveTest();
+        }
+
         history.push({
           role: "assistant",
-          content: e.text || JSON.stringify({ error: e.message }),
+          content: JSON.stringify(executionResponse),
         });
         history.push({
           role: "user",
-          content: `Your previous response failed schema validation with error: ${e.message}. Please correct your output to match the schema exactly.`,
+          content: `Action check: ${
+            executionResponse.intendedActionDescription
+          } completed. Result: ${
+            executionResponse.taskResult || "Action successful"
+          }`,
         });
-      }
-    }
 
-    if (!action) {
-      throw new Error(
-        `[Agent] Failed to generate a valid action after ${maxRetries} attempts.`,
-      );
-    }
+        lastActionString = JSON.stringify(action);
+        consecutiveSameAction = 0;
 
-    // Transform all refs into role/name/nth before execution and serialization
-    const mapRefToRoleName = (obj: any) => {
-      if (obj.ref && refs[obj.ref]) {
-        obj.role = refs[obj.ref].role;
-        if (refs[obj.ref].name) obj.name = refs[obj.ref].name;
-        if (refs[obj.ref].nth !== undefined) obj.nth = refs[obj.ref].nth;
-        if (obj.kind === "screenshot") {
-          obj.elementName = obj.name;
-          delete obj.name;
+        // Update task status if the execution agent says it's done
+        if (executionResponse.isTaskComplete) {
+          console.log(`[Agent][Asserter] Task reported complete. Verifying...`);
+
+          await browser.waitForStability();
+          const { text: afterSnapshot, refs: afterRefs } =
+            await browser.getSnapshotForLLM(false, false, fullSnapshot);
+          const afterUrl = browser.page?.url() || "";
+
+          let assertionRetries = 0;
+          let assertionResponse: AssertionAgentResponse | undefined;
+          const assertionHistory: any[] = [];
+
+          while (assertionRetries < 3) {
+            try {
+              const assertionResult = await generateObject({
+                model: model,
+                schema: AssertionAgentResponseSchema,
+                system: assertionPromptTemplate,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nBEFORE URL: ${currentTaskBeforeUrl}\n\nAFTER Snapshot:\n${afterSnapshot}\nAFTER URL: ${afterUrl}\n\nNetwork Logs during task:\n${JSON.stringify(browser.networkLogs, null, 2)}`,
+                      },
+                      ...(currentTaskBeforeScreenshot
+                        ? [
+                            {
+                              type: "image" as const,
+                              image: currentTaskBeforeScreenshot,
+                            },
+                          ]
+                        : []),
+                      ...(screenshot
+                        ? [
+                            {
+                              type: "image" as const,
+                              image: screenshot,
+                            },
+                          ]
+                        : []),
+                    ],
+                  },
+                  ...assertionHistory,
+                ],
+              });
+
+              assertionResponse = assertionResult.object;
+              console.log(
+                `[Agent][Asserter] Verification (Attempt ${assertionRetries + 1}): ${assertionResponse.isTaskVerified ? "PASSED" : "FAILED"}`,
+              );
+              console.log(
+                `[Agent][Asserter] Reasoning: ${assertionResponse.verificationReasoning}`,
+              );
+
+              if (assertionResponse.assertions.length > 0) {
+                for (const ass of assertionResponse.assertions)
+                  mapRefsToIdentifiers(ass, afterRefs);
+
+                console.log(
+                  `[Agent][Asserter] Executing generated assertions...`,
+                );
+                const { passed, failures } = await evaluateAssertions(
+                  assertionResponse.assertions,
+                  browser,
+                  afterRefs,
+                );
+
+                // Update the response with potentially corrected (resilience) assertions
+                assertionResponse.assertions = passed;
+
+                if (failures.length > 0) {
+                  console.error(
+                    `[Agent][Asserter] ❌ One or more generated assertions FAILED: Verification failed with ${failures.length} error(s):\n${failures.join("\n")}`,
+                  );
+                  assertionHistory.push({
+                    role: "assistant",
+                    content: JSON.stringify(assertionResponse),
+                  });
+                  assertionHistory.push({
+                    role: "user",
+                    content: `The assertions you generated failed programmatic verification: ${failures.join("\n")}. Please generate different assertions that correctly reflect the actual task completion state.`,
+                  });
+                  assertionRetries++;
+                } else {
+                  console.log(
+                    `[Agent][Asserter] ✅ All generated assertions PASSED.`,
+                  );
+                  break; // Success, exit retry loop
+                }
+              } else {
+                // No assertions generated, but LLM claims task is verified
+                // We'll accept it if it's verified, but usually we want proof
+                break;
+              }
+            } catch (e: any) {
+              assertionRetries++;
+              console.warn(
+                `[Agent][Asserter] Assertion schema validation failed (Attempt ${assertionRetries}/3): ${e.message}`,
+              );
+              assertionHistory.push({
+                role: "user",
+                content: `Your previous response failed schema validation: ${e.message}. Please output a valid JSON object matching AssertionAgentResponseSchema.`,
+              });
+            }
+          }
+
+          if (assertionResponse) {
+            if (serializer && assertionResponse.assertions.length > 0) {
+              serializer.logVerificationToLastStep(
+                assertionResponse.assertions,
+              );
+            }
+            history.push({
+              role: "user",
+              content: `Verification Result: ${assertionResponse.isTaskVerified ? "Passed" : "Failed"}. Reasoning: ${assertionResponse.verificationReasoning}`,
+            });
+
+            const tIdx = checklist.tasks.findIndex(
+              (t) => t.id === currentTaskId,
+            );
+            if (tIdx !== -1) {
+              checklist.tasks[tIdx].status = assertionResponse.isTaskVerified
+                ? "completed"
+                : "pending";
+              checklist.tasks[tIdx].result =
+                assertionResponse.verificationReasoning;
+            }
+          } else {
+            // Fallback if all 3 attempts failed to even generate a response
+            console.error(
+              `[Agent][Asserter] Failed to generate any valid assertion response after 3 attempts.`,
+            );
+            const tIdx = checklist.tasks.findIndex(
+              (t) => t.id === currentTaskId,
+            );
+            if (tIdx !== -1) {
+              checklist.tasks[tIdx].status = "completed"; // Assume done to avoid getting stuck
+            }
+          }
         }
-        delete obj.ref;
-      }
-    };
-
-    mapRefToRoleName(action);
-
-    if (action.kind === "drag") {
-      if (action.startRef && refs[action.startRef]) {
-        action.startRole = refs[action.startRef].role;
-        if (refs[action.startRef].name)
-          action.startName = refs[action.startRef].name;
-        if (refs[action.startRef].nth !== undefined)
-          action.startNth = refs[action.startRef].nth;
-        delete action.startRef;
-      }
-      if (action.endRef && refs[action.endRef]) {
-        action.endRole = refs[action.endRef].role;
-        if (refs[action.endRef].name) action.endName = refs[action.endRef].name;
-        if (refs[action.endRef].nth !== undefined)
-          action.endNth = refs[action.endRef].nth;
-        delete action.endRef;
-      }
-    }
-
-    if (action.kind === "fill" && Array.isArray(action.fields)) {
-      for (const field of action.fields) {
-        mapRefToRoleName(field);
-      }
-    }
-
-    if (Array.isArray(assertions)) {
-      for (const assertion of assertions) {
-        mapRefToRoleName(assertion);
-      }
-    }
-
-    console.log(`[Agent] Action elected & transformed:`, action);
-
-    if (artifactsDir) {
-      await fs.writeFile(
-        path.join(artifactsDir, `step-${stepCounter}-action.json`),
-        JSON.stringify(action, null, 2),
-        "utf-8",
-      );
-    }
-
-    // 3. Act & Serialize
-    try {
-      if (serializer && actionResult) {
-        serializer.updatePreviousResult(actionResult);
-      }
-      await browser.execute(action);
-
-      if (!skipAssertions && assertions && assertions.length > 0) {
-        await browser.waitForStability();
-        const { refs: evalRefs } = await browser.getSnapshotForLLM(true);
-        await evaluateAssertions(assertions, browser, evalRefs);
-      }
-
-      if (serializer) {
-        serializer.logAction(action, {
-          stateDescription,
-          actionIntent,
-          assertions,
+      } catch (e: any) {
+        console.error(
+          `[Agent][Executor] Action execution failed: ${e.message}`,
+        );
+        history.push({
+          role: "user",
+          content: `Action failed with error: ${e.message}`,
         });
-        await serializer.saveTest();
-      }
-      history.push({
-        role: "assistant",
-        content: JSON.stringify({
-          stateDescription,
-          actionIntent,
-          action,
-          assertions,
-        }),
-      });
-      history.push({
-        role: "user",
-        content: actionResult || `Action executed successfully.`,
-      });
-      lastActionString = JSON.stringify(action);
-      consecutiveSameAction = 0;
-    } catch (e: any) {
-      console.error(`[Agent] Action execution failed: ${e.message}`);
-      history.push({
-        role: "assistant",
-        content: JSON.stringify({
-          stateDescription,
-          actionIntent,
-          action,
-          assertions,
-        }),
-      });
-      history.push({
-        role: "user",
-        content: `Action failed with error: ${e.message}`,
-      });
 
-      const currentActionStr = JSON.stringify(action);
-      if (currentActionStr === lastActionString) {
-        consecutiveSameAction++;
-        if (consecutiveSameAction >= 3) {
-          throw new Error(
-            `[Agent] Aborting test: Agent is caught in a loop, repeating the exact same failing action 3 times: ${currentActionStr}`,
-          );
+        const currentActionStr = JSON.stringify(action);
+        if (currentActionStr === lastActionString) {
+          consecutiveSameAction++;
+          if (consecutiveSameAction >= 3) {
+            throw new Error(
+              `[Agent][Executor] Loop detected: Same failing action repeated 3 times.`,
+            );
+          }
+        } else {
+          lastActionString = currentActionStr;
+          consecutiveSameAction = 1;
         }
-      } else {
-        lastActionString = currentActionStr;
-        consecutiveSameAction = 1;
       }
-    }
 
-    // 5. Check Termination condition
-    if (action.kind === "screenshot" && action.name === "success") {
-      console.log(`[Agent] Success condition met. Goal achieved.`);
-      break;
-    }
+      if (action.kind === "screenshot" && action.name === "success") {
+        console.log(`[Agent][Executor] Final success milestone reached.`);
+        checklist.isGoalAchieved = true;
+        break;
+      }
 
-    previousSnapshot = snapshot;
-    stepCounter++;
+      stepCounter++;
+    }
+  } finally {
+    if (serializer) {
+      console.log(`[Agent] Ensuring final test results are saved...`);
+      serializer.updateChecklist(checklist);
+      await serializer.saveTest();
+      console.log(`[Agent] Final test results saved successfully.`);
+    }
   }
+}
+
+async function saveStepArtifacts(
+  dir: string,
+  step: number,
+  snapshot: string,
+  axTree: any,
+  refs: any,
+  browser: BrowserManager,
+  history: any[],
+  checklist: Checklist,
+) {
+  await fs.writeFile(path.join(dir, `step-${step}-snapshot.txt`), snapshot);
+  if (axTree) {
+    await fs.writeFile(
+      path.join(dir, `step-${step}-axtree.json`),
+      JSON.stringify(axTree, null, 2),
+    );
+  }
+  await fs.writeFile(
+    path.join(dir, `step-${step}-refs.json`),
+    JSON.stringify(refs, null, 2),
+  );
+  if (browser.page) {
+    await browser.page.screenshot({
+      path: path.join(dir, `step-${step}-screenshot.png`),
+    });
+  }
+  await fs.writeFile(
+    path.join(dir, `step-${step}-checklist.json`),
+    JSON.stringify(checklist, null, 2),
+  );
+  await fs.writeFile(
+    path.join(dir, `step-${step}-history.json`),
+    JSON.stringify(history, null, 2),
+  );
 }

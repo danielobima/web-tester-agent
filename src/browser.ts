@@ -30,6 +30,11 @@ export class BrowserManager {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   public page: Page | null = null;
+  public networkLogs: {
+    url: string;
+    method: string;
+    status: number;
+  }[] = [];
 
   // We need cdpUrl array and targetId for OpenClaw functions
   public cdpUrl: string = "";
@@ -48,6 +53,18 @@ export class BrowserManager {
 
     this.context = await this.browser.newContext();
     this.page = await this.context.newPage();
+
+    this.page.on("request", (request) => {
+      // push basic info
+    });
+
+    this.page.on("response", (response) => {
+      this.networkLogs.push({
+        url: response.url(),
+        method: response.request().method(),
+        status: response.status(),
+      });
+    });
 
     // Inject _snapshotForAI required by some OpenClaw aria fallback methods, though we attempt to use the locator version.
     // The targetId routing normally relies on `server-context` in OpenClaw.
@@ -83,6 +100,7 @@ export class BrowserManager {
   async getSnapshotForLLM(
     quiet: boolean = false,
     interactiveOnly: boolean = false,
+    fullSnapshot: boolean = false,
   ) {
     if (!this.page) throw new Error("Browser not initialized");
 
@@ -92,7 +110,7 @@ export class BrowserManager {
         cdpUrl: this.cdpUrl,
         targetId: this.targetId,
         selector: ":root",
-        options: interactiveOnly ? { interactive: true } : undefined,
+        options: fullSnapshot ? { raw: true } : (interactiveOnly ? { interactive: true } : undefined),
       });
 
       if (!quiet) console.log(`[Browser] Built Snapshot. Stats:`, stats);
@@ -140,7 +158,7 @@ export class BrowserManager {
     opts: string | { ref?: string; role?: string; name?: string; nth?: number },
   ) {
     if (!this.page) throw new Error("Browser not initialized");
-    return refLocator(this.page, opts);
+    return await refLocator(this.page, opts);
   }
 
   async execute(action: Action) {
@@ -166,6 +184,27 @@ export class BrowserManager {
           .click({
             timeout: action.timeoutMs ?? 5000,
           });
+        break;
+
+      case "select_option":
+        if (action.ref || action.role || action.name) {
+          await selectOptionViaPlaywright({
+            ...baseOpts,
+            ref: action.ref,
+            role: action.role,
+            name: action.name,
+            nth: action.nth,
+            values: [action.value],
+            timeoutMs: action.timeoutMs,
+          });
+        } else if (action.selector) {
+          await this.page
+            .locator(action.selector!)
+            .first()
+            .selectOption(action.value, {
+              timeout: action.timeoutMs ?? 5000,
+            });
+        }
         break;
 
       case "click":
@@ -238,6 +277,10 @@ export class BrowserManager {
           endNth: action.endNth,
           timeoutMs: action.timeoutMs,
         });
+        break;
+
+      case "stop":
+        console.log(`[Browser] Action 'stop' - no execution needed.`);
         break;
 
       case "select":

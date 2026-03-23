@@ -56,6 +56,37 @@ export const ActionSchema = z.discriminatedUnion("kind", [
 
   z
     .object({
+      kind: z.literal("select_option"),
+      ref: z
+        .string()
+        .optional()
+        .describe("The 'ref' ID of the element to select from"),
+      role: z.string().optional().describe("The ARIA role of the element"),
+      name: z
+        .string()
+        .optional()
+        .describe("The accessible name of the element"),
+      nth: z.number().optional().describe("The index if multiple match"),
+      selector: z
+        .string()
+        .optional()
+        .describe(
+          "A valid Playwright CSS or XPath selector of the select/combobox/radio button group (only use if ref is not available)",
+        ),
+      value: z.string().describe("The value or label of the option to select"),
+      timeoutMs: z
+        .number()
+        .optional()
+        .describe(
+          "Provide maximum time to wait in ms before failing the action",
+        ),
+    })
+    .describe(
+      "Select an option from a dropdown/select/combobox/radio button group using a ref, role, name, or raw selector.",
+    ),
+
+  z
+    .object({
       kind: z.literal("type"),
       ref: z
         .string()
@@ -391,6 +422,13 @@ export const ActionSchema = z.discriminatedUnion("kind", [
     .describe(
       "Take a visual screenshot of the current page. Required to report SUCCESS when goal is complete!",
     ),
+  z
+    .object({
+      kind: z.literal("stop"),
+    })
+    .describe(
+      "Indicates that the current task is already complete or no action is required. Use this to skip a task without taking any visual action.",
+    ),
 ]);
 
 // Extract the inferred type to use across the project
@@ -412,8 +450,11 @@ export const AssertionSchema = z.object({
       "textContains",
       "textEquals",
       "inputValueEquals",
+      "valueEquals",
       "hasClass",
       "hasAttribute",
+      "pageNavigated",
+      "networkRequestCompleted",
     ])
     .describe("The type of assertion to evaluate"),
   value: z
@@ -429,3 +470,86 @@ export const AssertionSchema = z.object({
 });
 
 export type Assertion = z.infer<typeof AssertionSchema>;
+
+// --- Multi-Agent Schemas ---
+
+export const TaskSchema = z.object({
+  id: z.string().describe("Unique identifier for the task"),
+  description: z
+    .string()
+    .describe("A concise summary of what needs to be achieved in this task"),
+  status: z
+    .enum(["pending", "in_progress", "completed", "failed"])
+    .describe("The current operational status of the task"),
+  result: z
+    .string()
+    .optional()
+    .describe("Summary of what was achieved or why it failed"),
+});
+
+export type Task = z.infer<typeof TaskSchema>;
+
+export const ChecklistSchema = z.object({
+  currentStateDescription: z
+    .string()
+    .describe("Current perception of the application state"),
+  tasks: z
+    .array(TaskSchema)
+    .describe("The sequence of high-level tasks to achieve the goal"),
+  nextTaskId: z
+    .string()
+    .optional()
+    .describe("The ID of the task that should be prioritized next"),
+  isGoalAchieved: z
+    .boolean()
+    .describe(
+      "Termination flag indicating if the overall user goal is fulfilled",
+    ),
+});
+
+export type Checklist = z.infer<typeof ChecklistSchema>;
+
+export const ExecutionResponseSchema = z.object({
+  currentStateDescription: z
+    .string()
+    .describe("Detailed observation of the current page elements and state"),
+  intendedActionDescription: z
+    .string()
+    .describe("Plain-text rationale for the selected action"),
+  previousActionResult: z
+    .string()
+    .optional()
+    .describe("Outcome of the previous execution step"),
+  action: ActionSchema,
+  isTaskComplete: z
+    .boolean()
+    .describe("Whether this specific high-level task is now finished"),
+  taskResult: z
+    .string()
+    .optional()
+    .describe(
+      "A summary of what was accomplished during this task, if complete",
+    ),
+});
+
+export type ExecutionResponse = z.infer<typeof ExecutionResponseSchema>;
+
+export const AssertionAgentResponseSchema = z.object({
+  currentStateDescription: z
+    .string()
+    .describe("Comparison of the page state before and after the task"),
+  assertions: z
+    .array(AssertionSchema)
+    .max(1)
+    .describe("The set of assertions generated to verify the task completion"),
+  isTaskVerified: z
+    .boolean()
+    .describe("Whether the task is considered successfully verified"),
+  verificationReasoning: z
+    .string()
+    .describe("Rationale for why the task is or isn't verified"),
+});
+
+export type AssertionAgentResponse = z.infer<
+  typeof AssertionAgentResponseSchema
+>;

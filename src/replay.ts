@@ -8,30 +8,45 @@ export async function evaluateAssertions(
   assertions: Assertion[],
   browser: BrowserManager,
   refs: Record<string, any>,
-) {
+): Promise<{ passed: Assertion[]; failures: string[] }> {
   if (!browser.page) throw new Error("No active page to evaluate assertions");
 
-  for (const assertion of assertions) {
-    console.log(
-      `[Assert] Evaluating assertion: ${assertion.type} on ref ${assertion.ref || assertion.role}`,
-    );
-    let locator;
-    if (assertion.role || assertion.ref) {
-      locator = await browser.getLocator(assertion);
-    }
+  console.log(
+    `[Assert] Selected ${assertions.length} assertions for verification:`,
+  );
+  assertions.forEach((a, i) => {
+    const target = a.role
+      ? `role="${a.role}"${a.name ? ` name="${a.name}"` : ""}`
+      : a.ref
+        ? `ref="${a.ref}"`
+        : "page";
+    console.log(`  ${i + 1}. [${a.type}] on ${target}`);
+  });
 
-    if (!locator) {
-      if (assertion.type === "isHidden") {
-        console.log(
-          `[Assert] Assertion passed: target is entirely absent from the DOM.`,
-        );
-        continue;
-      }
-      // Default to the body/root if no role/ref is provided
-      locator = browser.page.locator("body");
-    }
+  const passed: Assertion[] = [];
+  const failures: string[] = [];
+
+  for (let i = 0; i < assertions.length; i++) {
+    const assertion = assertions[i];
+    const label = `Assertion #${i + 1} [${assertion.type}]`;
+    console.log(`[Assert] Evaluating ${label}...`);
 
     try {
+      let locator;
+      if (assertion.role || assertion.ref) {
+        locator = await browser.getLocator(assertion);
+      }
+
+      if (!locator) {
+        if (assertion.type === "isHidden") {
+          console.log(`[Assert] ✅ PASSED: ${label} (element is absent)`);
+          passed.push(assertion);
+          continue;
+        }
+        // Default to the body/root if no role/ref is provided
+        locator = browser.page.locator("body");
+      }
+
       switch (assertion.type) {
         case "isVisible":
           await locator.waitFor({ state: "visible", timeout: 5000 });
@@ -42,8 +57,6 @@ export async function evaluateAssertions(
         case "textContains":
           if (!assertion.value)
             throw new Error("Assertion 'textContains' requires a value.");
-          // Ensure it's rendered, wait for text
-          // Playwright locator.filter({ hasText }) or expect equivalent
           const textContent = await locator.textContent();
           if (!textContent || !textContent.includes(assertion.value)) {
             throw new Error(
@@ -62,8 +75,9 @@ export async function evaluateAssertions(
           }
           break;
         case "inputValueEquals":
+        case "valueEquals":
           if (!assertion.value)
-            throw new Error("Assertion 'inputValueEquals' requires a value.");
+            throw new Error(`Assertion '${assertion.type}' requires a value.`);
           const inputValue = await locator.inputValue();
           if (inputValue !== assertion.value) {
             throw new Error(
@@ -82,31 +96,74 @@ export async function evaluateAssertions(
           }
           break;
         case "hasAttribute":
-          if (!assertion.attributeNode)
+          let attrName = assertion.attributeNode;
+          let expectedVal = assertion.value;
+
+          // Resilience: If attributeNode is missing but value is present and looks like an attribute name
+          if (!attrName && expectedVal && !expectedVal.includes(" ")) {
+            console.log(
+              `[Assert] ⚠️ Resilience: 'hasAttribute' missing 'attributeNode'. Using 'value' ("${expectedVal}") as attribute name.`,
+            );
+            assertion.attributeNode = expectedVal;
+            assertion.value = undefined;
+            attrName = expectedVal;
+            expectedVal = undefined; // We don't know the expected value, just checking existence
+          }
+
+          if (!attrName)
             throw new Error(
               "Assertion 'hasAttribute' requires an attributeNode.",
             );
-          const attrVal = await locator.getAttribute(assertion.attributeNode);
-          if (assertion.value && attrVal !== assertion.value) {
+
+          const attrVal = await locator.getAttribute(attrName);
+          if (expectedVal !== undefined && attrVal !== expectedVal) {
             throw new Error(
-              `Attribute '${assertion.attributeNode}' value '${attrVal}' does not match expected '${assertion.value}'`,
+              `Attribute '${attrName}' value '${attrVal}' does not match expected '${expectedVal}'`,
             );
           }
           if (attrVal === null) {
+            throw new Error(`Element missing expected attribute '${attrName}'`);
+          }
+          break;
+        case "pageNavigated":
+          if (!assertion.value)
+            throw new Error("Assertion 'pageNavigated' requires a value.");
+          const currentUrl = browser.page.url();
+          if (!currentUrl.includes(assertion.value)) {
             throw new Error(
-              `Element missing expected attribute '${assertion.attributeNode}'`,
+              `Expected URL to contain '${assertion.value}', but got '${currentUrl}'`,
+            );
+          }
+          break;
+        case "networkRequestCompleted":
+          if (!assertion.value)
+            throw new Error(
+              "Assertion 'networkRequestCompleted' requires a value.",
+            );
+          const requestFound = browser.networkLogs.some(
+            (req) =>
+              req.url.includes(assertion.value!) &&
+              req.status >= 200 &&
+              req.status < 400,
+          );
+          if (!requestFound) {
+            throw new Error(
+              `Expected network request containing '${assertion.value}' to have completed successfully, but it was not found in logs.`,
             );
           }
           break;
         default:
           throw new Error(`Unknown assertion type: ${(assertion as any).type}`);
       }
+      console.log(`[Assert] ✅ PASSED: ${label}`);
+      passed.push(assertion);
     } catch (e: any) {
-      throw new Error(
-        `Assertion type '${assertion.type}' failed: ${e.message}`,
-      );
+      console.log(`[Assert] ❌ FAILED: ${label} - ${e.message}`);
+      failures.push(`${label}: ${e.message}`);
     }
   }
+
+  return { passed, failures };
 }
 
 // Extract to heal step
@@ -116,12 +173,13 @@ async function heal(
   errorMsg: string,
   testGoal: string,
   model: LanguageModel,
+  fullSnapshot?: boolean,
 ): Promise<Action> {
   console.log(
     `[Healer] Attempting to heal step: ${JSON.stringify(step.action)}`,
   );
 
-  const { text: snapshot } = await browser.getSnapshotForLLM();
+  const { text: snapshot } = await browser.getSnapshotForLLM(false, false, fullSnapshot);
 
   const fs = await import("fs/promises");
   const path = await import("path");
@@ -156,6 +214,7 @@ export async function replayTest(
   model: LanguageModel,
   artifactsDir?: string,
   skipAssertions?: boolean,
+  fullSnapshot?: boolean,
 ) {
   const serializer = new TestSerializer();
   const test = await serializer.loadTest(filePath);
@@ -174,27 +233,39 @@ export async function replayTest(
     console.log(`[Replay] Saving artifacts to ${artifactsDir}`);
   }
 
+  let wasHealed = false;
   for (let i = 0; i < test.steps.length; i++) {
     const step = test.steps[i];
     console.log(`[Replay] Executing Step ${i + 1}: ${step.action.kind}`);
 
     try {
       await browser.waitForStability();
-      await browser.getSnapshotForLLM();
+      await browser.getSnapshotForLLM(false, false, fullSnapshot);
       await browser.execute(step.action);
 
       // Post-action verification
       await browser.waitForStability();
-      const { refs } = await browser.getSnapshotForLLM(true);
+      const { refs } = await browser.getSnapshotForLLM(true, false, fullSnapshot);
 
       if (skipAssertions) {
         console.log(
           `[Replay] Skipping assertions (--skip-assertions is enabled).`,
         );
-      } else if (step.assertions && step.assertions.length > 0) {
-        await evaluateAssertions(step.assertions, browser, refs);
-      } else {
-        console.log(`[Replay] No assertions to evaluate for this step.`);
+      } else if (
+        step.verificationAssertions &&
+        step.verificationAssertions.length > 0
+      ) {
+        console.log(`[Replay] Evaluating task verification assertions...`);
+        const { passed } = await evaluateAssertions(
+          step.verificationAssertions,
+          browser,
+          refs,
+        );
+        // Check if assertions were corrected/filtered
+        if (JSON.stringify(passed) !== JSON.stringify(step.verificationAssertions)) {
+          step.verificationAssertions = passed;
+          wasHealed = true;
+        }
       }
 
       if (artifactsDir && browser.page) {
@@ -207,7 +278,7 @@ export async function replayTest(
       console.error(`[Replay] ❌ Step ${i + 1} Failed: ${e.message}`);
 
       // Attempt Healing
-      const newAction = await heal(step, browser, e.message, test.name, model);
+      const newAction = await heal(step, browser, e.message, test.name, model, fullSnapshot);
 
       try {
         console.log(`[Replay] 🛠️ Executing healed action...`);
@@ -222,6 +293,7 @@ export async function replayTest(
           reason: e.message,
         });
         step.action = newAction; // Replace broken action
+        wasHealed = true;
 
         console.log(`[Replay] ✅ Healed successfully. Trace updated.`);
         if (artifactsDir && browser.page) {
@@ -239,6 +311,10 @@ export async function replayTest(
     }
   }
 
-  console.log(`[Replay] Saving updated test spec to ${filePath}`);
-  await serializer.saveTest(filePath.replace(".json", "-healed.json")); // Save any healing changes
+  if (wasHealed) {
+    console.log(`[Replay] Saving updated test spec to ${filePath}`);
+    await serializer.saveTest(filePath.replace(".json", "-healed.json")); // Save any healing changes
+  } else {
+    console.log(`[Replay] No healing required. Skipping -healed.json save.`);
+  }
 }

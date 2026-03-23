@@ -16,8 +16,8 @@ async function main() {
 
   if (!command) {
     console.log(`Usage: 
-    npm run dev -- record "<Goal>" "<StartUrl>" "<OutputFile.json>" [--save-artifacts]
-    npm run dev -- replay "<File.json>"`);
+    npm run dev -- record "<Goal>" "<StartUrl>" "<OutputFile.json>" [--no-artifacts] [--full-snapshot]
+    npm run dev -- replay "<File.json>" [--no-artifacts] [--full-snapshot]`);
     process.exit(1);
   }
 
@@ -36,17 +36,19 @@ async function main() {
       if (!modelName) modelName = "deepseek-r1:7b";
       model = ollama(modelName);
     } else {
-      if (!modelName) modelName = "gemini-2.5-flash";
+      if (!modelName) modelName = "gemini-3.1-flash-lite-preview";
       model = google(modelName);
     }
 
     if (command === "record") {
-      const saveArtifacts = args.includes("--save-artifacts");
+      const saveArtifacts = !args.includes("--no-artifacts");
       const skipAssertions = args.includes("--skip-assertions");
+      const fullSnapshot = args.includes("--full-snapshot");
       const cleanArgs = args.filter(
         (a) =>
-          a !== "--save-artifacts" &&
+          a !== "--no-artifacts" &&
           a !== "--skip-assertions" &&
+          a !== "--full-snapshot" &&
           !a.startsWith("--provider=") &&
           !a.startsWith("--model="),
       );
@@ -83,6 +85,7 @@ async function main() {
         serializer,
         artifactsDir,
         skipAssertions,
+        fullSnapshot,
       );
 
       const rawTest = serializer.getTest();
@@ -90,12 +93,14 @@ async function main() {
       await serializer.saveTest(finalOutPath);
       console.log(`[CLI] Recording finished. Saved to ${finalOutPath}`);
     } else if (command === "replay") {
-      const saveArtifacts = args.includes("--save-artifacts");
+      const saveArtifacts = !args.includes("--no-artifacts");
       const skipAssertions = args.includes("--skip-assertions");
+      const fullSnapshot = args.includes("--full-snapshot");
       const cleanArgs = args.filter(
         (a) =>
-          a !== "--save-artifacts" &&
+          a !== "--no-artifacts" &&
           a !== "--skip-assertions" &&
+          a !== "--full-snapshot" &&
           !a.startsWith("--provider=") &&
           !a.startsWith("--model="),
       );
@@ -114,6 +119,7 @@ async function main() {
         model as any,
         artifactsDir,
         skipAssertions,
+        fullSnapshot,
       );
       console.log(`[CLI] Replay finished.`);
     } else {
