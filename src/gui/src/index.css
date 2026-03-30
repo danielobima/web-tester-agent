@@ -1,33 +1,64 @@
 @import "tailwindcss";
 
 @theme {
-  --color-accent: var(--accent);
-  --color-border: var(--border);
+  --color-surface: var(--surface);
+  --color-surface-low: var(--surface-low);
+  --color-surface-highest: var(--surface-highest);
+  --color-surface-lowest: var(--surface-lowest);
+  --color-primary: var(--primary);
+  --color-on-surface: var(--on-surface);
+  --color-tertiary: var(--tertiary);
+  
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  
+  --radius-md: 0.25rem;
 }
 
 :root {
-  --accent: #3b82f6;
-  --accent-bg: #eff6ff;
-  --accent-border: #bfdbfe;
-  --border: #e2e8f0;
-  --text-h: #1e293b;
-  --social-bg: #f8fafc;
-  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --background: #ffffff;
-  --foreground: #0f172a;
+  /* Design System Tokens */
+  --surface: #F7F9FB;
+  --surface-low: #F2F4F6;
+  --surface-highest: #E0E3E5;
+  --surface-lowest: #FFFFFF;
+  --primary: #0059BB;
+  --on-surface: #191C1E;
+  --tertiary: #9E3D00;
+  
+  --shadow-ambient: 0px 12px 32px rgba(25, 28, 30, 0.06);
 }
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body);
+  background-color: var(--surface);
+  color: var(--on-surface);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: var(--background);
-  color: var(--foreground);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 #root {
+  height: 100vh;
   display: flex;
-  flex-direction: column;
-  min-height: 100vh;
+  overflow: hidden;
+}
+
+/* Custom scrollbar to match the clinical look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-highest);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C0C3C5;
 }
