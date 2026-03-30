@@ -8,7 +8,7 @@
     "gui:dev": "npm run dev --prefix src/gui",
     "electron:dev": "electron dist/app.js",
     "dev": "concurrently \"npm run gui:dev\" \"wait-on http://localhost:5173 && npm run build && npm run electron:dev\"",
-    "build": "tsc"
+    "build": "tsc && cp src/*.txt dist/ 2>/dev/null || true && cp -r src/prompts dist/ 2>/dev/null || true"
   },
   "keywords": [],
   "author": "",

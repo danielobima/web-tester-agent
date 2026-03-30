@@ -74,6 +74,15 @@ function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   }
 }
 
+export interface AgentStepUpdate {
+  id: string;
+  step: string;
+  status: 'success' | 'failed' | 'pending';
+  duration: string;
+  description: string;
+  error?: string;
+}
+
 export async function runAgent(
   requirement: string,
   browser: BrowserManager,
@@ -82,6 +91,9 @@ export async function runAgent(
   artifactsDir?: string,
   skipAssertions?: boolean,
   fullSnapshot?: boolean,
+  onStep?: (update: AgentStepUpdate) => void,
+  onChecklist?: (checklist: Checklist) => void,
+  signal?: AbortSignal,
 ) {
   const history: any[] = [];
   let stepCounter = 1;
@@ -122,6 +134,9 @@ export async function runAgent(
 
   try {
     while (stepCounter < 50) {
+      if (signal?.aborted) {
+        throw new Error("Agent terminated by user");
+      }
       // 1. Observe
       await browser.waitForStability();
       const {
@@ -152,6 +167,7 @@ export async function runAgent(
 
       // 2. Planning Step
       console.log(`[Agent][Planner] Planning...`);
+      const planningStartTime = Date.now();
       try {
         const planningResult = await generateObject({
           model: model,
@@ -183,6 +199,7 @@ export async function runAgent(
           ],
         });
         checklist = planningResult.object;
+        if (onChecklist) onChecklist(checklist);
         if (serializer) {
           serializer.updateChecklist(checklist);
         }
@@ -211,6 +228,17 @@ export async function runAgent(
 
       const currentTaskId = checklist.nextTaskId;
       const currentTask = checklist.tasks.find((t) => t.id === currentTaskId);
+
+      if (onStep && currentTask) {
+        const planningDuration = `${((Date.now() - planningStartTime) / 1000).toFixed(1)}s`;
+        onStep({
+          id: `planning-${stepCounter}`,
+          step: `Planning: ${currentTask.id}`,
+          status: 'success',
+          duration: planningDuration,
+          description: `Strategic focus: ${currentTask.description}`
+        });
+      }
 
       if (!currentTaskId || !currentTask) {
         console.error(
@@ -243,6 +271,7 @@ export async function runAgent(
       let executionResponse: ExecutionResponse | undefined;
       let retries = 0;
       const maxRetries = 3;
+      const actionStartTime = Date.now();
 
       while (retries < maxRetries) {
         try {
@@ -354,6 +383,7 @@ Please review the ExecutionResponseSchema and correct your output. Common issues
         }
 
         await browser.execute(action);
+        const actionDuration = `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`;
 
         if (serializer) {
           serializer.logAction(action, {
@@ -380,6 +410,16 @@ Please review the ExecutionResponseSchema and correct your output. Common issues
         lastActionString = JSON.stringify(action);
         consecutiveSameAction = 0;
 
+        if (onStep && currentTask) {
+          onStep({
+            id: `exec-${stepCounter}`,
+            step: `Executing: ${action.kind}`,
+            status: 'success',
+            duration: actionDuration,
+            description: executionResponse.intendedActionDescription
+          });
+        }
+
         // Update task status if the execution agent says it's done
         if (executionResponse.isTaskComplete) {
           console.log(`[Agent][Asserter] Task reported complete. Verifying...`);
@@ -388,6 +428,7 @@ Please review the ExecutionResponseSchema and correct your output. Common issues
           const { text: afterSnapshot, refs: afterRefs } =
             await browser.getSnapshotForLLM(false, false, fullSnapshot);
           const afterUrl = browser.page?.url() || "";
+          const verificationStartTime = Date.now();
 
           let assertionRetries = 0;
           let assertionResponse: AssertionAgentResponse | undefined;
@@ -509,6 +550,19 @@ Please review the ExecutionResponseSchema and correct your output. Common issues
                 : "pending";
               checklist.tasks[tIdx].result =
                 assertionResponse.verificationReasoning;
+              if (onChecklist) onChecklist(checklist);
+            }
+
+            if (onStep) {
+              const verificationDuration = `${((Date.now() - verificationStartTime) / 1000).toFixed(1)}s`;
+              onStep({
+                id: `verify-${stepCounter}`,
+                step: `Verifying: ${currentTaskId}`,
+                status: assertionResponse.isTaskVerified ? 'success' : 'failed',
+                duration: verificationDuration,
+                description: assertionResponse.verificationReasoning,
+                error: assertionResponse.isTaskVerified ? undefined : "Task verification failed after execution."
+              });
             }
           } else {
             // Fallback if all 3 attempts failed to even generate a response
