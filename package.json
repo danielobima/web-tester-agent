@@ -2,9 +2,12 @@
   "name": "ai-qa-bot",
   "version": "1.0.0",
   "description": "",
-  "main": "dist/index.js",
+  "main": "dist/app.js",
   "scripts": {
-    "dev": "ts-node src/index.ts",
+    "cli": "ts-node src/cli.ts",
+    "gui:dev": "npm run dev --prefix src/gui",
+    "electron:dev": "electron dist/app.js",
+    "dev": "concurrently \"npm run gui:dev\" \"wait-on http://localhost:5173 && npm run build && npm run electron:dev\"",
     "build": "tsc"
   },
   "keywords": [],
@@ -12,9 +15,15 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "@types/node": "^25.3.0",
+    "@types/node": "^24.12.0",
+    "autoprefixer": "^10.4.27",
+    "concurrently": "^9.1.2",
+    "electron": "^41.0.4",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wait-on": "^7.2.0"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.30",

@@ -88,8 +88,6 @@ async function main() {
         fullSnapshot,
       );
 
-      const rawTest = serializer.getTest();
-
       await serializer.saveTest(finalOutPath);
       console.log(`[CLI] Recording finished. Saved to ${finalOutPath}`);
     } else if (command === "replay") {
