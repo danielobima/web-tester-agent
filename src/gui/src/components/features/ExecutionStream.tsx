@@ -12,11 +12,13 @@ export interface TestStep {
 interface ExecutionStreamProps {
   results: TestStep[];
   isGenerating?: boolean;
+  onReplay?: () => void;
 }
 
 export const ExecutionStream = ({
   results,
   isGenerating = false,
+  onReplay,
 }: ExecutionStreamProps) => {
   return (
     <div className="h-full bg-surface-lowest rounded-md shadow-ambient overflow-hidden flex flex-col border border-on-surface/5">
@@ -105,7 +107,10 @@ export const ExecutionStream = ({
           {results.filter((r) => r.status === "failed").length} failures
         </div>
         <div className="flex gap-6 text-[10px] font-bold uppercase tracking-widest">
-          <span className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors">
+          <span 
+            className={`flex items-center gap-2 cursor-pointer hover:text-primary transition-colors ${isGenerating ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
+            onClick={onReplay}
+          >
             <Icons.TestSuites /> Replay
           </span>
         </div>

@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('electron', {
   stopTest: () => {
     ipcRenderer.send('stop-test');
   },
+  replayTest: () => {
+    ipcRenderer.send('replay-test');
+  },
   onTestStep: (callback: (step: any) => void) => {
     const subscription = (event: any, step: any) => callback(step);
     ipcRenderer.on('test-step', subscription);

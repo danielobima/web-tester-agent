@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import * as path from "path";
 import { BrowserManager } from "./browser";
 import { runAgent } from "./agent";
+import { replayTest } from "./replay";
+import { TestSerializer } from "./recorder";
 import { google } from "@ai-sdk/google";
 import * as dotenv from "dotenv";
 
@@ -44,6 +46,12 @@ app.whenReady().then(() => {
   ipcMain.on("start-test", async (event, { url, prompt }) => {
     const browser = new BrowserManager();
     const testStartTime = Date.now();
+    const serializer = new TestSerializer();
+    const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
+    
+    serializer.startTest(prompt, url);
+    serializer.setOutPath(lastRunPath);
+
     activeTestController = new AbortController();
     try {
       await browser.init(false); // Show browser so user can see the bot
@@ -53,7 +61,7 @@ app.whenReady().then(() => {
         prompt,
         browser,
         model as any,
-        undefined, // serializer
+        serializer, // Pass the serializer to record the test
         undefined, // artifactsDir
         false, // skipAssertions
         false, // fullSnapshot
@@ -102,6 +110,52 @@ app.whenReady().then(() => {
   ipcMain.on("stop-test", () => {
     if (activeTestController) {
       activeTestController.abort();
+    }
+  });
+
+  ipcMain.on("replay-test", async (event) => {
+    console.log("[IPC] Received replay-test");
+    const browser = new BrowserManager();
+    const testStartTime = Date.now();
+    const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
+    
+    activeTestController = new AbortController();
+    try {
+      await browser.init(false);
+      // We can use the same model as start-test
+      await replayTest(
+        lastRunPath,
+        browser,
+        model as any,
+        undefined, // artifactsDir
+        false, // skipAssertions
+        false, // fullSnapshot
+        (update) => {
+          if (mainWindow) mainWindow.webContents.send("test-step", update);
+        },
+        (checklist) => {
+          if (mainWindow) mainWindow.webContents.send("test-checklist", checklist);
+        },
+        activeTestController.signal,
+      );
+
+      if (mainWindow) {
+        const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
+        mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration });
+      }
+    } catch (error: any) {
+      console.error("Replay failed:", error);
+      if (mainWindow) {
+        const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
+        mainWindow.webContents.send("test-complete", {
+          success: false,
+          error: error.message,
+          duration: totalDuration
+        });
+      }
+    } finally {
+      await browser.close();
+      activeTestController = null;
     }
   });
 

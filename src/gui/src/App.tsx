@@ -14,6 +14,7 @@ declare global {
     electron: {
       startTest: (url: string, prompt: string) => void;
       stopTest: () => void;
+      replayTest: () => void;
       onTestStep: (callback: (step: TestStep) => void) => () => void;
       onTestChecklist: (callback: (checklist: any) => void) => () => void;
       onTestComplete: (callback: (result: { success: boolean; error?: string }) => void) => () => void;
@@ -85,6 +86,14 @@ function App() {
     setIsGenerating(false);
   };
 
+  const handleReplay = () => {
+    setTestResults([]);
+    setTasks([]);
+    setIsGenerating(true);
+    setIsStopping(false);
+    window.electron.replayTest();
+  };
+
   const hasSubmitted = isGenerating || testResults.length > 0;
 
   return (
@@ -139,6 +148,7 @@ function App() {
                     <ExecutionStream 
                       results={testResults} 
                       isGenerating={isGenerating} 
+                      onReplay={handleReplay}
                     />
                     <div className="mt-4 flex justify-end">
                        <button 

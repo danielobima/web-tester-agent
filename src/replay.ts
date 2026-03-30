@@ -215,6 +215,9 @@ export async function replayTest(
   artifactsDir?: string,
   skipAssertions?: boolean,
   fullSnapshot?: boolean,
+  onStep?: (update: any) => void,
+  onChecklist?: (checklist: any) => void,
+  signal?: AbortSignal,
 ) {
   const serializer = new TestSerializer();
   const test = await serializer.loadTest(filePath);
@@ -233,9 +236,18 @@ export async function replayTest(
     console.log(`[Replay] Saving artifacts to ${artifactsDir}`);
   }
 
+  if (onChecklist && test.checklist) {
+    onChecklist(test.checklist);
+  }
+
   let wasHealed = false;
   for (let i = 0; i < test.steps.length; i++) {
+    if (signal?.aborted) {
+      throw new Error("Replay terminated by user");
+    }
+
     const step = test.steps[i];
+    const stepStartTime = Date.now();
     console.log(`[Replay] Executing Step ${i + 1}: ${step.action.kind}`);
 
     try {
@@ -266,6 +278,16 @@ export async function replayTest(
           step.verificationAssertions = passed;
           wasHealed = true;
         }
+      }
+
+      if (onStep) {
+        onStep({
+          id: `replay-${i + 1}`,
+          step: `Replaying: ${step.action.kind}`,
+          status: 'success',
+          duration: `${((Date.now() - stepStartTime) / 1000).toFixed(1)}s`,
+          description: step.actionIntent || `Successfully replayed ${step.action.kind} action.`
+        });
       }
 
       if (artifactsDir && browser.page) {
