@@ -7,9 +7,12 @@ contextBridge.exposeInMainWorld('electron', {
   stopTest: () => {
     ipcRenderer.send('stop-test');
   },
-  replayTest: () => {
-    ipcRenderer.send('replay-test');
+  replayTest: (suitePath?: string) => {
+    ipcRenderer.send('replay-test', { suitePath });
   },
+  listSuites: () => ipcRenderer.invoke('list-suites'),
+  getSuite: (suitePath: string) => ipcRenderer.invoke('get-suite', suitePath),
+  deleteSuite: (suitePath: string) => ipcRenderer.invoke('delete-suite', suitePath),
   onTestStep: (callback: (step: any) => void) => {
     const subscription = (event: any, step: any) => callback(step);
     ipcRenderer.on('test-step', subscription);

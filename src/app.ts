@@ -6,8 +6,11 @@ import { replayTest } from "./replay";
 import { TestSerializer } from "./recorder";
 import { google } from "@ai-sdk/google";
 import * as dotenv from "dotenv";
+import * as fs from "fs/promises";
 
 dotenv.config();
+
+const suitesDir = path.join(app.getPath("userData"), "suites");
 
 let mainWindow: BrowserWindow | null = null;
 let activeTestController: AbortController | null = null;
@@ -49,8 +52,12 @@ app.whenReady().then(() => {
     const serializer = new TestSerializer();
     const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
     
+    // Also save to a unique file in the suites directory
+    const suiteName = prompt.slice(0, 30).replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    const suitePath = path.join(suitesDir, `suite-${suiteName}-${Date.now()}.json`);
+    
     serializer.startTest(prompt, url);
-    serializer.setOutPath(lastRunPath);
+    serializer.setOutPath(suitePath);
 
     activeTestController = new AbortController();
     try {
@@ -81,6 +88,8 @@ app.whenReady().then(() => {
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
         console.log("[IPC] Sending test-complete event");
+        // Also save to the last-run for quick replay
+        await serializer.saveTest(lastRunPath);
         mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration });
       }
     } catch (error: any) {
@@ -113,18 +122,17 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.on("replay-test", async (event) => {
-    console.log("[IPC] Received replay-test");
+  ipcMain.on("replay-test", async (event, { suitePath } = {}) => {
+    console.log("[IPC] Received replay-test", suitePath);
     const browser = new BrowserManager();
     const testStartTime = Date.now();
-    const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
+    const targetPath = suitePath || path.join(app.getPath("userData"), "last-run.json");
     
     activeTestController = new AbortController();
     try {
       await browser.init(false);
-      // We can use the same model as start-test
       await replayTest(
-        lastRunPath,
+        targetPath,
         browser,
         model as any,
         undefined, // artifactsDir
@@ -156,6 +164,51 @@ app.whenReady().then(() => {
     } finally {
       await browser.close();
       activeTestController = null;
+    }
+  });
+
+  ipcMain.handle("list-suites", async () => {
+    try {
+      await fs.mkdir(suitesDir, { recursive: true });
+      const files = await fs.readdir(suitesDir);
+      const suites = [];
+      
+      for (const file of files) {
+        if (file.endsWith(".json")) {
+          const content = await fs.readFile(path.join(suitesDir, file), "utf-8");
+          const data = JSON.parse(content);
+          suites.push({
+            id: data.id,
+            name: data.name,
+            url: data.startUrl,
+            stepsCount: data.steps?.length || 0,
+            path: path.join(suitesDir, file),
+            createdAt: data.id.split("-")[1] ? parseInt(data.id.split("-")[1]) : 0
+          });
+        }
+      }
+      return suites.sort((a, b) => b.createdAt - a.createdAt);
+    } catch (error) {
+      console.error("Failed to list suites:", error);
+      return [];
+    }
+  });
+
+  ipcMain.handle("get-suite", async (event, suitePath) => {
+    try {
+      const content = await fs.readFile(suitePath, "utf-8");
+      return JSON.parse(content);
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("delete-suite", async (event, suitePath) => {
+    try {
+      await fs.unlink(suitePath);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
     }
   });
 
