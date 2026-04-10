@@ -6,23 +6,28 @@ import { TestingPlan } from "../components/features/StatsSection";
 import type { ChecklistTask } from "../components/features/StatsSection";
 import { ExecutionStream } from "../components/features/ExecutionStream";
 import type { TestStep } from "../components/features/ExecutionStream";
+import { PlanApproval } from "../components/features/PlanApproval";
+import { GoalValidation } from "../components/features/GoalValidation";
 import { Icons } from "../components/ui/Icons";
 
 export const Dashboard = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("Browser State");
-  // ...
+  
   useEffect(() => {
     if (location.state?.replaying) {
-      // Clear the state so it doesn't trigger on refresh
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state?.replaying, location.pathname, navigate]);
+
   const [isGenerating, setIsGenerating] = useState(!!location.state?.replaying);
   const [isStopping, setIsStopping] = useState(false);
   const [testResults, setTestResults] = useState<TestStep[]>([]);
   const [tasks, setTasks] = useState<ChecklistTask[]>([]);
+  const [pendingPlan, setPendingPlan] = useState<any>(null);
+  const [pendingGoalValidation, setPendingGoalValidation] = useState<any>(null);
+  const [isPlanning, setIsPlanning] = useState(false);
 
   useEffect(() => {
     const unsubStep = window.electron.onTestStep((step: TestStep) => {
@@ -37,28 +42,39 @@ export const Dashboard = () => {
       setTasks(checklist.tasks);
     });
 
+    const unsubPlanRequest = window.electron.onPlanApprovalRequest((checklist: { tasks: ChecklistTask[] }) => {
+      setPendingPlan(checklist);
+    });
+    
+    const unsubGoalReached = window.electron.onGoalReached((checklist: any) => {
+      setPendingGoalValidation(checklist);
+    });
+
+    const unsubPlanning = window.electron.onPlanningState((planning: boolean) => {
+      setIsPlanning(planning);
+    });
+
     const unsubComplete = window.electron.onTestComplete((result: { success: boolean; error?: string; duration?: string }) => {
       setIsGenerating(false);
       setIsStopping(false);
-
-      setTestResults(prev => [
-        ...prev,
-        {
-          id: `complete-${Date.now()}`,
-          step: result.success ? "Execution Finished" : "Execution Failed",
-          status: result.success ? "success" : "failed",
-          duration: result.duration || "FIN",
-          description: result.success 
-            ? "The agent has successfully achieved the stated goal." 
-            : `The agent encountered a terminal error: ${result.error || "Unknown error"}`
-        }
-      ]);
+      setPendingPlan(null);
+      setPendingGoalValidation(null);
+      setTestResults(prev => [...prev, {
+        id: `complete-${Date.now()}`,
+        step: result.success ? "Execution Finished" : "Execution Failed",
+        status: result.success ? "success" : "failed",
+        duration: result.duration || "FIN",
+        description: result.success ? "Successfully achieved goal." : `Error: ${result.error || "Unknown"}`
+      }]);
     });
 
     return () => {
       unsubStep();
       unsubChecklist();
+      unsubPlanRequest();
+      unsubGoalReached();
       unsubComplete();
+      unsubPlanning();
     };
   }, []);
 
@@ -67,12 +83,29 @@ export const Dashboard = () => {
     setIsStopping(false);
     setTestResults([]);
     setTasks([]);
+    setPendingPlan(null);
+    setPendingGoalValidation(null);
+    setIsPlanning(false);
     window.electron.startTest(url, prompt);
+  };
+
+  const handleApprovePlan = (action: 'accept' | 'modify' | 'reject', modifiedChecklist?: any) => {
+    window.electron.approvePlan({ action, checklist: modifiedChecklist });
+    setPendingPlan(null);
+    if (action === 'reject') setIsGenerating(false);
   };
 
   const handleStop = () => {
     setIsStopping(true);
+    setPendingPlan(null);
+    setPendingGoalValidation(null);
     window.electron.stopTest();
+  };
+  
+  const handleGoalAction = (action: 'validate' | 'prompt' | 'cancel', feedback?: string) => {
+    window.electron.sendGoalValidationResponse({ action, feedback });
+    setPendingGoalValidation(null);
+    if (action === 'cancel') setIsGenerating(false);
   };
 
   const handleReset = () => {
@@ -95,63 +128,36 @@ export const Dashboard = () => {
     <div className="flex-1 overflow-y-auto px-10 pb-20">
       <div className="max-w-6xl mx-auto py-6">
         {!hasSubmitted ? (
-          <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="space-y-10">
             <TestBuilder onGenerate={handleGenerate} isGenerating={isGenerating} />
-            <div className="grid grid-cols-12 gap-8">
-              <div className="col-span-12 lg:col-span-12">
-                <ConfigSection activeTab={activeTab} setActiveTab={setActiveTab} />
-              </div>
-            </div>
+            <ConfigSection activeTab={activeTab} setActiveTab={setActiveTab} />
           </div>
         ) : (
-          <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
+          <div className="space-y-8">
             <div className="flex items-center justify-between pb-2">
               <h2 className="text-2xl font-bold font-display">Test Execution</h2>
               {isGenerating && (
-                <button 
-                  onClick={handleStop}
-                  disabled={isStopping}
-                  className={`px-4 py-2 border rounded-md text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${
-                    isStopping 
-                      ? 'bg-on-surface/5 text-on-surface/30 border-on-surface/10 cursor-not-allowed' 
-                      : 'bg-orange-600/10 text-orange-600 border-orange-600/20 hover:bg-orange-600 hover:text-white'
-                  }`}
-                >
-                  <div className={`w-2 h-2 rounded-sm ${isStopping ? 'bg-on-surface/20 animate-pulse' : 'bg-current'}`}></div>
-                  {isStopping ? 'Stopping Execution...' : 'Stop Execution'}
+                <button onClick={handleStop} disabled={isStopping} className="px-4 py-2 bg-orange-600/10 text-orange-600 border border-orange-600/20 rounded-md text-xs font-bold uppercase tracking-widest hover:bg-orange-600 hover:text-white transition-all">
+                  {isStopping ? 'Stopping...' : 'Stop Execution'}
                 </button>
               )}
             </div>
             <div className="grid grid-cols-12 gap-8 items-start">
-              <div className="col-span-12 lg:col-span-4 sticky top-0">
-                <TestingPlan tasks={tasks} />
-                <div className="mt-8 p-6 bg-surface-low rounded-md border border-on-surface/5">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-on-surface/30 mb-4">Active Configuration</h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between text-sm"><span className="text-on-surface/40">Model</span><span className="font-medium">Gemini 3.1</span></div>
-                    <div className="flex justify-between text-sm"><span className="text-on-surface/40">Viewport</span><span className="font-medium">1280x720</span></div>
-                  </div>
-                </div>
+              <div className="col-span-12 lg:col-span-4 lg:sticky lg:top-10 z-10">
+                <TestingPlan tasks={tasks} isPlanning={isPlanning} />
               </div>
-              <div className="col-span-12 lg:col-span-8">
-                <ExecutionStream 
-                  results={testResults} 
-                  isGenerating={isGenerating} 
-                  onReplay={handleReplay}
-                />
-                <div className="mt-4 flex justify-end">
-                   <button 
-                     onClick={handleReset}
-                     className="text-xs font-bold uppercase tracking-widest text-primary hover:underline flex items-center gap-2"
-                   >
-                     <Icons.ChevronRight /> Back to Builder
-                   </button>
-                </div>
+              <div className="col-span-12 lg:col-span-8 space-y-4">
+                <ExecutionStream results={testResults} isGenerating={isGenerating} onReplay={handleReplay} />
+                <button onClick={handleReset} className="text-xs font-bold uppercase tracking-widest text-primary hover:underline flex items-center gap-2">
+                  <Icons.ChevronRight /> Back to Builder
+                </button>
               </div>
             </div>
           </div>
         )}
       </div>
+      {pendingPlan && <PlanApproval checklist={pendingPlan} onApprove={handleApprovePlan} />}
+      {pendingGoalValidation && <GoalValidation checklist={pendingGoalValidation} onAction={handleGoalAction} />}
     </div>
   );
 };

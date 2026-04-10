@@ -505,6 +505,10 @@ export const ChecklistSchema = z.object({
     .describe(
       "Termination flag indicating if the overall user goal is fulfilled",
     ),
+  screenshot: z
+    .string()
+    .optional()
+    .describe("Base64 encoded screenshot of the final state"),
 });
 
 export type Checklist = z.infer<typeof ChecklistSchema>;
@@ -540,7 +544,6 @@ export const AssertionAgentResponseSchema = z.object({
     .describe("Comparison of the page state before and after the task"),
   assertions: z
     .array(AssertionSchema)
-    .max(1)
     .describe("The set of assertions generated to verify the task completion"),
   isTaskVerified: z
     .boolean()

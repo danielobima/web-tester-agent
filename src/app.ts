@@ -14,8 +14,10 @@ const suitesDir = path.join(app.getPath("userData"), "suites");
 
 let mainWindow: BrowserWindow | null = null;
 let activeTestController: AbortController | null = null;
+let planApprovalPromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
+let goalValidationPromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
 
-const model = google("gemini-3.1-flash-lite-preview"); // Default model
+const model = google("gemini-3.1-flash-lite-preview");
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -33,7 +35,6 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL(devUrl);
-    // mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, "../src/gui/dist/index.html"));
   }
@@ -52,7 +53,6 @@ app.whenReady().then(() => {
     const serializer = new TestSerializer();
     const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
     
-    // Also save to a unique file in the suites directory
     const suiteName = prompt.slice(0, 30).replace(/[^a-z0-9]/gi, "_").toLowerCase();
     const suitePath = path.join(suitesDir, `suite-${suiteName}-${Date.now()}.json`);
     
@@ -61,34 +61,45 @@ app.whenReady().then(() => {
 
     activeTestController = new AbortController();
     try {
-      await browser.init(false); // Show browser so user can see the bot
+      await browser.init(false);
       await browser.execute({ kind: "navigate", url });
 
       await runAgent(
         prompt,
         browser,
         model as any,
-        serializer, // Pass the serializer to record the test
-        undefined, // artifactsDir
-        false, // skipAssertions
-        false, // fullSnapshot
+        serializer,
+        undefined,
+        false,
+        false,
         (update) => {
-          if (mainWindow) {
-            mainWindow.webContents.send("test-step", update);
-          }
+          if (mainWindow) mainWindow.webContents.send("test-step", update);
         },
         (checklist) => {
-          if (mainWindow) {
-            mainWindow.webContents.send("test-checklist", checklist);
-          }
+          if (mainWindow) mainWindow.webContents.send("test-checklist", checklist);
+        },
+        async (checklist) => {
+          if (!mainWindow) return { action: 'accept' };
+          return new Promise((resolve, reject) => {
+            planApprovalPromise = { resolve, reject };
+            mainWindow?.webContents.send("plan-approval-request", checklist);
+          });
+        },
+        async (checklist) => {
+          if (!mainWindow) return { action: 'validate' };
+          return new Promise((resolve, reject) => {
+            goalValidationPromise = { resolve, reject };
+            mainWindow?.webContents.send("goal-reached", checklist);
+          });
+        },
+        (isPlanning: boolean) => {
+          if (mainWindow) mainWindow.webContents.send("test-planning-state", isPlanning);
         },
         activeTestController.signal,
       );
 
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-        console.log("[IPC] Sending test-complete event");
-        // Also save to the last-run for quick replay
         await serializer.saveTest(lastRunPath);
         mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration });
       }
@@ -104,11 +115,7 @@ app.whenReady().then(() => {
           error: error.stack,
         });
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-        mainWindow.webContents.send("test-complete", {
-          success: false,
-          error: error.message,
-          duration: totalDuration
-        });
+        mainWindow.webContents.send("test-complete", { success: false, error: error.message, duration: totalDuration });
       }
     } finally {
       await browser.close();
@@ -117,49 +124,53 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on("stop-test", () => {
-    if (activeTestController) {
-      activeTestController.abort();
+    if (activeTestController) activeTestController.abort();
+    if (planApprovalPromise) {
+      planApprovalPromise.resolve({ action: 'reject' });
+      planApprovalPromise = null;
+    }
+    if (goalValidationPromise) {
+      goalValidationPromise.resolve({ action: 'cancel' });
+      goalValidationPromise = null;
+    }
+  });
+
+  ipcMain.on("goal-validation-response", (event, result) => {
+    if (goalValidationPromise) {
+      goalValidationPromise.resolve(result);
+      goalValidationPromise = null;
+    }
+  });
+
+  ipcMain.on("approve-plan", (event, result) => {
+    if (planApprovalPromise) {
+      planApprovalPromise.resolve(result);
+      planApprovalPromise = null;
     }
   });
 
   ipcMain.on("replay-test", async (event, { suitePath } = {}) => {
-    console.log("[IPC] Received replay-test", suitePath);
     const browser = new BrowserManager();
     const testStartTime = Date.now();
     const targetPath = suitePath || path.join(app.getPath("userData"), "last-run.json");
-    
     activeTestController = new AbortController();
     try {
       await browser.init(false);
-      await replayTest(
-        targetPath,
-        browser,
-        model as any,
-        undefined, // artifactsDir
-        false, // skipAssertions
-        false, // fullSnapshot
-        (update) => {
-          if (mainWindow) mainWindow.webContents.send("test-step", update);
-        },
-        (checklist) => {
-          if (mainWindow) mainWindow.webContents.send("test-checklist", checklist);
-        },
-        activeTestController.signal,
-      );
-
+      await replayTest(targetPath, browser, model as any, undefined, false, false, (update) => {
+        if (mainWindow) mainWindow.webContents.send("test-step", update);
+      }, (checklist) => {
+        if (mainWindow) mainWindow.webContents.send("test-checklist", checklist);
+      }, (isPlanning: boolean) => {
+        if (mainWindow) mainWindow.webContents.send("test-planning-state", isPlanning);
+      }, activeTestController.signal);
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
         mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration });
       }
     } catch (error: any) {
-      console.error("Replay failed:", error);
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-        mainWindow.webContents.send("test-complete", {
-          success: false,
-          error: error.message,
-          duration: totalDuration
-        });
+        mainWindow.webContents.send("test-complete", { success: false, error: error.message, duration: totalDuration });
       }
     } finally {
       await browser.close();
@@ -172,24 +183,15 @@ app.whenReady().then(() => {
       await fs.mkdir(suitesDir, { recursive: true });
       const files = await fs.readdir(suitesDir);
       const suites = [];
-      
       for (const file of files) {
         if (file.endsWith(".json")) {
           const content = await fs.readFile(path.join(suitesDir, file), "utf-8");
           const data = JSON.parse(content);
-          suites.push({
-            id: data.id,
-            name: data.name,
-            url: data.startUrl,
-            stepsCount: data.steps?.length || 0,
-            path: path.join(suitesDir, file),
-            createdAt: data.id.split("-")[1] ? parseInt(data.id.split("-")[1]) : 0
-          });
+          suites.push({ id: data.id, name: data.name, url: data.startUrl, stepsCount: data.steps?.length || 0, path: path.join(suitesDir, file), createdAt: data.id.split("-")[1] ? parseInt(data.id.split("-")[1]) : 0 });
         }
       }
       return suites.sort((a, b) => b.createdAt - a.createdAt);
     } catch (error) {
-      console.error("Failed to list suites:", error);
       return [];
     }
   });
@@ -213,14 +215,10 @@ app.whenReady().then(() => {
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform !== "darwin") app.quit();
 });

@@ -217,6 +217,7 @@ export async function replayTest(
   fullSnapshot?: boolean,
   onStep?: (update: any) => void,
   onChecklist?: (checklist: any) => void,
+  onPlanning?: (isPlanning: boolean) => void,
   signal?: AbortSignal,
 ) {
   const serializer = new TestSerializer();

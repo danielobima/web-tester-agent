@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('electron', {
   stopTest: () => {
     ipcRenderer.send('stop-test');
   },
+  approvePlan: (result: any) => {
+    ipcRenderer.send('approve-plan', result);
+  },
   replayTest: (suitePath?: string) => {
     ipcRenderer.send('replay-test', { suitePath });
   },
@@ -23,9 +26,27 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('test-checklist', subscription);
     return () => ipcRenderer.removeListener('test-checklist', subscription);
   },
+  onPlanApprovalRequest: (callback: (checklist: any) => void) => {
+    const subscription = (event: any, checklist: any) => callback(checklist);
+    ipcRenderer.on('plan-approval-request', subscription);
+    return () => ipcRenderer.removeListener('plan-approval-request', subscription);
+  },
+  onGoalReached: (callback: (checklist: any) => void) => {
+    const subscription = (event: any, checklist: any) => callback(checklist);
+    ipcRenderer.on('goal-reached', subscription);
+    return () => ipcRenderer.removeListener('goal-reached', subscription);
+  },
+  sendGoalValidationResponse: (result: any) => {
+    ipcRenderer.send('goal-validation-response', result);
+  },
   onTestComplete: (callback: (result: any) => void) => {
     const subscription = (event: any, result: any) => callback(result);
     ipcRenderer.on('test-complete', subscription);
     return () => ipcRenderer.removeListener('test-complete', subscription);
+  },
+  onPlanningState: (callback: (isPlanning: boolean) => void) => {
+    const subscription = (event: any, isPlanning: boolean) => callback(isPlanning);
+    ipcRenderer.on('test-planning-state', subscription);
+    return () => ipcRenderer.removeListener('test-planning-state', subscription);
   }
 });
