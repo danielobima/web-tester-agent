@@ -480,10 +480,11 @@ export async function getPageForTargetId(opts: {
     throw new Error("No pages available in the connected browser.");
   }
   const first = pages[0];
-  if (!opts.targetId) {
+  const tid = opts.targetId === "root_target_id" ? undefined : opts.targetId;
+  if (!tid) {
     return first;
   }
-  const found = await findPageByTargetId(browser, opts.targetId, opts.cdpUrl);
+  const found = await findPageByTargetId(browser, tid, opts.cdpUrl);
   if (!found) {
     // Extension relays can block CDP attachment APIs (e.g. Target.attachToBrowserTarget),
     // which prevents us from resolving a page's targetId via newCDPSession(). If Playwright

@@ -39,6 +39,17 @@ contextBridge.exposeInMainWorld('electron', {
   sendGoalValidationResponse: (result: any) => {
     ipcRenderer.send('goal-validation-response', result);
   },
+  pauseTest: () => {
+    ipcRenderer.send('pause-test');
+  },
+  resumeTest: (result: any) => {
+    ipcRenderer.send('resume-test', result);
+  },
+  onPauseRequest: (callback: (checklist: any) => void) => {
+    const subscription = (event: any, checklist: any) => callback(checklist);
+    ipcRenderer.on('pause-request', subscription);
+    return () => ipcRenderer.removeListener('pause-request', subscription);
+  },
   onTestComplete: (callback: (result: any) => void) => {
     const subscription = (event: any, result: any) => callback(result);
     ipcRenderer.on('test-complete', subscription);

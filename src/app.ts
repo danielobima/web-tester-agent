@@ -16,6 +16,8 @@ let mainWindow: BrowserWindow | null = null;
 let activeTestController: AbortController | null = null;
 let planApprovalPromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
 let goalValidationPromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
+let pausePromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
+let isPaused = false;
 
 const model = google("gemini-3.1-flash-lite-preview");
 
@@ -95,6 +97,13 @@ app.whenReady().then(() => {
         (isPlanning: boolean) => {
           if (mainWindow) mainWindow.webContents.send("test-planning-state", isPlanning);
         },
+        async (checklist) => {
+          if (!isPaused) return { action: 'resume' };
+          return new Promise((resolve, reject) => {
+            pausePromise = { resolve, reject };
+            mainWindow?.webContents.send("pause-request", checklist);
+          });
+        },
         activeTestController.signal,
       );
 
@@ -125,6 +134,7 @@ app.whenReady().then(() => {
 
   ipcMain.on("stop-test", () => {
     if (activeTestController) activeTestController.abort();
+    isPaused = false;
     if (planApprovalPromise) {
       planApprovalPromise.resolve({ action: 'reject' });
       planApprovalPromise = null;
@@ -132,6 +142,22 @@ app.whenReady().then(() => {
     if (goalValidationPromise) {
       goalValidationPromise.resolve({ action: 'cancel' });
       goalValidationPromise = null;
+    }
+    if (pausePromise) {
+      pausePromise.resolve({ action: 'resume' });
+      pausePromise = null;
+    }
+  });
+
+  ipcMain.on("pause-test", () => {
+    isPaused = true;
+  });
+
+  ipcMain.on("resume-test", (event, result) => {
+    isPaused = false;
+    if (pausePromise) {
+      pausePromise.resolve(result);
+      pausePromise = null;
     }
   });
 

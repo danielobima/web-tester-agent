@@ -8,6 +8,7 @@ import { ExecutionStream } from "../components/features/ExecutionStream";
 import type { TestStep } from "../components/features/ExecutionStream";
 import { PlanApproval } from "../components/features/PlanApproval";
 import { GoalValidation } from "../components/features/GoalValidation";
+import { PauseOverlay, type ManualPauseResult } from "../components/features/PauseOverlay";
 import { Icons } from "../components/ui/Icons";
 
 export const Dashboard = () => {
@@ -23,10 +24,12 @@ export const Dashboard = () => {
 
   const [isGenerating, setIsGenerating] = useState(!!location.state?.replaying);
   const [isStopping, setIsStopping] = useState(false);
+  const [isManualPausing, setIsManualPausing] = useState(false);
   const [testResults, setTestResults] = useState<TestStep[]>([]);
   const [tasks, setTasks] = useState<ChecklistTask[]>([]);
   const [pendingPlan, setPendingPlan] = useState<any>(null);
   const [pendingGoalValidation, setPendingGoalValidation] = useState<any>(null);
+  const [pendingPauseChecklist, setPendingPauseChecklist] = useState<any>(null);
   const [isPlanning, setIsPlanning] = useState(false);
 
   useEffect(() => {
@@ -54,11 +57,18 @@ export const Dashboard = () => {
       setIsPlanning(planning);
     });
 
+    const unsubPauseRequest = window.electron.onPauseRequest((checklist: any) => {
+      setPendingPauseChecklist(checklist);
+      setIsManualPausing(false);
+    });
+
     const unsubComplete = window.electron.onTestComplete((result: { success: boolean; error?: string; duration?: string }) => {
       setIsGenerating(false);
       setIsStopping(false);
+      setIsManualPausing(false);
       setPendingPlan(null);
       setPendingGoalValidation(null);
+      setPendingPauseChecklist(null);
       setTestResults(prev => [...prev, {
         id: `complete-${Date.now()}`,
         step: result.success ? "Execution Finished" : "Execution Failed",
@@ -75,16 +85,19 @@ export const Dashboard = () => {
       unsubGoalReached();
       unsubComplete();
       unsubPlanning();
+      unsubPauseRequest();
     };
   }, []);
 
   const handleGenerate = (url: string, prompt: string) => {
     setIsGenerating(true);
     setIsStopping(false);
+    setIsManualPausing(false);
     setTestResults([]);
     setTasks([]);
     setPendingPlan(null);
     setPendingGoalValidation(null);
+    setPendingPauseChecklist(null);
     setIsPlanning(false);
     window.electron.startTest(url, prompt);
   };
@@ -99,7 +112,18 @@ export const Dashboard = () => {
     setIsStopping(true);
     setPendingPlan(null);
     setPendingGoalValidation(null);
+    setPendingPauseChecklist(null);
     window.electron.stopTest();
+  };
+
+  const handlePause = () => {
+    setIsManualPausing(true);
+    window.electron.pauseTest();
+  };
+
+  const handleResume = (result: ManualPauseResult) => {
+    window.electron.resumeTest(result);
+    setPendingPauseChecklist(null);
   };
   
   const handleGoalAction = (action: 'validate' | 'prompt' | 'cancel', feedback?: string) => {
@@ -137,9 +161,21 @@ export const Dashboard = () => {
             <div className="flex items-center justify-between pb-2">
               <h2 className="text-2xl font-bold font-display">Test Execution</h2>
               {isGenerating && (
-                <button onClick={handleStop} disabled={isStopping} className="px-4 py-2 bg-orange-600/10 text-orange-600 border border-orange-600/20 rounded-md text-xs font-bold uppercase tracking-widest hover:bg-orange-600 hover:text-white transition-all">
-                  {isStopping ? 'Stopping...' : 'Stop Execution'}
-                </button>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={handlePause} 
+                    disabled={isStopping || isManualPausing || !!pendingPauseChecklist} 
+                    className={`px-4 py-2 border rounded-md text-xs font-bold uppercase tracking-widest transition-all transition-all flex items-center gap-2 ${
+                      isManualPausing ? 'bg-primary/10 text-primary border-primary/20 animate-pulse' : 'bg-on-surface/5 text-on-surface/40 border-on-surface/10 hover:bg-on-surface/10 hover:text-on-surface'
+                    }`}
+                  >
+                    <Icons.Pause />
+                    {isManualPausing ? 'Pausing...' : 'Pause Execution'}
+                  </button>
+                  <button onClick={handleStop} disabled={isStopping} className="px-4 py-2 bg-orange-600/10 text-orange-600 border border-orange-600/20 rounded-md text-xs font-bold uppercase tracking-widest hover:bg-orange-600 hover:text-white transition-all">
+                    {isStopping ? 'Stopping...' : 'Stop Execution'}
+                  </button>
+                </div>
               )}
             </div>
             <div className="grid grid-cols-12 gap-8 items-start">
@@ -158,6 +194,7 @@ export const Dashboard = () => {
       </div>
       {pendingPlan && <PlanApproval checklist={pendingPlan} onApprove={handleApprovePlan} />}
       {pendingGoalValidation && <GoalValidation checklist={pendingGoalValidation} onAction={handleGoalAction} />}
+      {pendingPauseChecklist && <PauseOverlay checklist={pendingPauseChecklist} onAction={handleResume} onCancel={() => setPendingPauseChecklist(null)} />}
     </div>
   );
 };

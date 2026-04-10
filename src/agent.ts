@@ -32,6 +32,11 @@ export type GoalReachedResult =
   | { action: 'prompt', feedback: string }
   | { action: 'cancel' };
 
+export type ManualPauseResult = 
+  | { action: 'resume' }
+  | { action: 'reprompt', feedback: string }
+  | { action: 'modify', checklist: Checklist };
+
 function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   if (!obj) return;
   const map = (target: any) => {
@@ -101,6 +106,7 @@ export async function runAgent(
   onPlanApproval?: (checklist: Checklist) => Promise<PlanApprovalResult>,
   onGoalReached?: (checklist: Checklist) => Promise<GoalReachedResult>,
   onPlanning?: (isPlanning: boolean) => void,
+  onManualPause?: (checklist: Checklist) => Promise<ManualPauseResult>,
   signal?: AbortSignal,
 ) {
   const history: AgentHistoryMessage[] = [];
@@ -130,6 +136,23 @@ export async function runAgent(
   try {
     while (stepCounter < 50) {
       if (signal?.aborted) throw new Error("Agent terminated by user");
+
+      if (onManualPause) {
+        const pauseResult = await onManualPause(checklist);
+        if (pauseResult.action === 'reprompt') {
+          requirement += `\nLatest User Feedback: ${pauseResult.feedback}`;
+          checklist.isGoalAchieved = false;
+          needsPlanApproval = true;
+          // No break/continue needed here, it will naturally re-plan below
+        } else if (pauseResult.action === 'modify') {
+          checklist = pauseResult.checklist;
+          if (onChecklist) onChecklist(checklist);
+          if (serializer) serializer.updateChecklist(checklist);
+          needsPlanApproval = false; // Usually if they manually modified it they don't want to re-approve immediately? 
+                                     // Actually, let's keep it false if they just modified it themselves.
+        }
+      }
+
       await browser.waitForStability();
       const { text: snapshot, axTree, refs } = await browser.getSnapshotForLLM(false, false, fullSnapshot);
       const currentUrl = browser.page?.url() || "";

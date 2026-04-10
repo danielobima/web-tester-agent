@@ -38,7 +38,7 @@ export class BrowserManager {
 
   // We need cdpUrl array and targetId for OpenClaw functions
   public cdpUrl: string = "";
-  public targetId: string = "root_target_id";
+  public targetId: string = "";
 
   async init(headless: boolean = false) {
     if (this.browser) return; // Already initialized
@@ -75,7 +75,7 @@ export class BrowserManager {
     const session = await this.context.newCDPSession(this.page);
     try {
       const info: any = await session.send("Target.getTargetInfo");
-      this.targetId = info?.targetInfo?.targetId || "root_target_id";
+      this.targetId = info?.targetInfo?.targetId || "";
     } catch {
       // fallback
     } finally {

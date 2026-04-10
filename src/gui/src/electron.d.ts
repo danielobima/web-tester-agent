@@ -22,6 +22,9 @@ declare global {
       onPlanApprovalRequest: (callback: (checklist: any) => void) => () => void;
       onGoalReached: (callback: (checklist: any) => void) => () => void;
       sendGoalValidationResponse: (result: { action: 'validate' | 'prompt' | 'cancel', feedback?: string }) => void;
+      pauseTest: () => void;
+      resumeTest: (result: { action: 'resume' } | { action: 'reprompt', feedback: string } | { action: 'modify', checklist: any }) => void;
+      onPauseRequest: (callback: (checklist: any) => void) => () => void;
       onTestComplete: (callback: (result: { success: boolean; error?: string; duration?: string }) => void) => () => void;
       onPlanningState: (callback: (isPlanning: boolean) => void) => () => void;
     };
