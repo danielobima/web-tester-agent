@@ -33,7 +33,7 @@ export const GoalValidation = ({ checklist, onAction }: GoalValidationProps) => 
           {checklist.screenshot && (
             <div className="relative group rounded-md overflow-hidden border border-on-surface/5 bg-surface-low aspect-video shadow-inner">
               <img 
-                src={`data:image/jpeg;base64,${checklist.screenshot}`} 
+                src={checklist.screenshot.startsWith('media://') ? checklist.screenshot : `data:image/jpeg;base64,${checklist.screenshot}`} 
                 alt="Validation State" 
                 className="w-full h-full object-contain"
               />

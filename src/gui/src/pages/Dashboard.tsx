@@ -31,6 +31,7 @@ export const Dashboard = () => {
   const [pendingGoalValidation, setPendingGoalValidation] = useState<any>(null);
   const [pendingPauseChecklist, setPendingPauseChecklist] = useState<any>(null);
   const [isPlanning, setIsPlanning] = useState(false);
+  const [completedSuitePath, setCompletedSuitePath] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubStep = window.electron.onTestStep((step: TestStep) => {
@@ -62,13 +63,16 @@ export const Dashboard = () => {
       setIsManualPausing(false);
     });
 
-    const unsubComplete = window.electron.onTestComplete((result: { success: boolean; error?: string; duration?: string }) => {
+    const unsubComplete = window.electron.onTestComplete((result: { success: boolean; error?: string; duration?: string; suitePath?: string }) => {
       setIsGenerating(false);
       setIsStopping(false);
       setIsManualPausing(false);
       setPendingPlan(null);
       setPendingGoalValidation(null);
       setPendingPauseChecklist(null);
+      if (result.success && result.suitePath) {
+        setCompletedSuitePath(result.suitePath);
+      }
       setTestResults(prev => [...prev, {
         id: `complete-${Date.now()}`,
         step: result.success ? "Execution Finished" : "Execution Failed",
@@ -135,6 +139,7 @@ export const Dashboard = () => {
   const handleReset = () => {
     setTestResults([]);
     setTasks([]);
+    setCompletedSuitePath(null);
     setIsGenerating(false);
   };
 
@@ -184,9 +189,19 @@ export const Dashboard = () => {
               </div>
               <div className="col-span-12 lg:col-span-8 space-y-4">
                 <ExecutionStream results={testResults} isGenerating={isGenerating} onReplay={handleReplay} />
-                <button onClick={handleReset} className="text-xs font-bold uppercase tracking-widest text-primary hover:underline flex items-center gap-2">
-                  <Icons.ChevronRight /> Back to Builder
-                </button>
+                <div className="flex items-center gap-6">
+                  <button onClick={handleReset} className="text-xs font-bold uppercase tracking-widest text-primary hover:underline flex items-center gap-2">
+                    <Icons.ChevronLeft /> Back to Builder
+                  </button>
+                  {completedSuitePath && (
+                    <button 
+                      onClick={() => navigate("/suites", { state: { suitePath: completedSuitePath, viewMode: "report" } })}
+                      className="bg-primary text-white px-5 py-2 rounded-md font-bold text-[11px] uppercase tracking-wider shadow-ambient hover:opacity-90 transition-all flex items-center gap-2"
+                    >
+                      <Icons.TestSuites /> View Full Report
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

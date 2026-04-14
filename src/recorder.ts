@@ -106,9 +106,15 @@ export class TestSerializer {
       console.warn("[TestSerializer] No output path set, skipping save.");
       return;
     }
-    console.log(`[TestSerializer] Saving test to: ${targetPath}`);
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, JSON.stringify(this.test, null, 2), "utf-8");
+
+    const baseDir = path.dirname(targetPath);
+    try {
+      console.log(`[TestSerializer] Saving test to: ${targetPath}`);
+      await fs.mkdir(baseDir, { recursive: true });
+      await fs.writeFile(targetPath, JSON.stringify(this.test, null, 2), "utf-8");
+    } catch (error: any) {
+      console.error(`[TestSerializer] Failed to save test: ${error.message}`);
+    }
   }
 
   async loadTest(filePath: string): Promise<SerializedTest> {

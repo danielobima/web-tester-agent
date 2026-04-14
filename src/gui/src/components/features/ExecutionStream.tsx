@@ -104,7 +104,7 @@ export const ExecutionStream = ({
                           <Icons.Image /> State Screenshot
                         </div>
                         <img 
-                          src={`data:image/jpeg;base64,${result.screenshot}`} 
+                          src={result.screenshot} 
                           className="rounded border border-on-surface/5 shadow-sm max-w-full"
                           alt="Step State"
                         />

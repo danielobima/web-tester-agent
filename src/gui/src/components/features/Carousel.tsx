@@ -64,7 +64,7 @@ export const Carousel = ({ steps, activeIndex, onClose, onNavigate }: CarouselPr
             {currentStep.screenshot ? (
               <div className="relative group">
                 <img 
-                  src={`data:image/jpeg;base64,${currentStep.screenshot}`} 
+                  src={currentStep.screenshot} 
                   className="max-h-[75vh] rounded-lg shadow-2xl shadow-black border border-white/10 object-contain animate-in zoom-in-95 duration-500"
                   alt="Step Visual State"
                 />
@@ -153,7 +153,7 @@ export const Carousel = ({ steps, activeIndex, onClose, onNavigate }: CarouselPr
             className={`w-12 h-12 rounded border-2 transition-all flex-shrink-0 overflow-hidden ${idx === activeIndex ? 'border-primary ring-4 ring-primary/20 scale-110' : 'border-white/10 opacity-30 hover:opacity-100'}`}
           >
             {step.screenshot ? (
-              <img src={`data:image/jpeg;base64,${step.screenshot}`} className="w-full h-full object-cover" />
+              <img src={step.screenshot} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full bg-white/5" />
             )}

@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, protocol, net } from "electron";
+import { pathToFileURL } from "node:url";
 import * as path from "path";
 import { BrowserManager } from "./browser";
 import { runAgent } from "./agent";
@@ -7,8 +8,13 @@ import { TestSerializer } from "./recorder";
 import { google } from "@ai-sdk/google";
 import * as dotenv from "dotenv";
 import * as fs from "fs/promises";
+import { generateMarkdownReport } from "./reporter";
 
 dotenv.config();
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: "media", privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: true, stream: true } }
+]);
 
 const suitesDir = path.join(app.getPath("userData"), "suites");
 
@@ -46,7 +52,42 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+
+app.whenReady().then(async () => {
+  
+  // Register media protocol to serve local images securely
+  protocol.handle("media", async (request) => {
+    try {
+      let filePath = decodeURIComponent(request.url.replace("media://", ""));
+      
+      // Normalization: Ensure the path is absolute (critical for Linux)
+      if (!filePath.startsWith("/")) {
+        filePath = "/" + filePath;
+      }
+      
+      // Security: Only allow paths within userData
+      const userDataPath = app.getPath("userData");
+      if (!filePath.startsWith(userDataPath)) {
+        console.warn(`[Protocol] Forbidden access attempt: ${filePath}`);
+        return new Response("Forbidden Access", { status: 403 });
+      }
+
+      // Diagnostic: Check if file exists before trying to fetch
+      try {
+        await fs.access(filePath);
+      } catch (err) {
+        console.warn(`[Protocol] File NOT FOUND: ${filePath}`);
+        return new Response("File Not Found", { status: 404 });
+      }
+
+      console.log(`[Protocol] Loading file: ${filePath}`);
+      return net.fetch(pathToFileURL(filePath).toString());
+    } catch (error) {
+      console.error(`[Protocol] Error handling media request:`, error);
+      return new Response("Internal Server Error", { status: 500 });
+    }
+  });
+
   createWindow();
 
   ipcMain.on("start-test", async (event, { url, prompt }) => {
@@ -56,7 +97,10 @@ app.whenReady().then(() => {
     const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
     
     const suiteName = prompt.slice(0, 30).replace(/[^a-z0-9]/gi, "_").toLowerCase();
-    const suitePath = path.join(suitesDir, `suite-${suiteName}-${Date.now()}.json`);
+    const timestamp = Date.now();
+    const suitePath = path.join(suitesDir, `suite-${suiteName}-${timestamp}.json`);
+    const sessionScreenshotsDir = path.join(suitesDir, `suite-${suiteName}-${timestamp}.screenshots`);
+    await fs.mkdir(sessionScreenshotsDir, { recursive: true });
     
     serializer.startTest(prompt, url);
     serializer.setOutPath(suitePath);
@@ -104,13 +148,22 @@ app.whenReady().then(() => {
             mainWindow?.webContents.send("pause-request", checklist);
           });
         },
-        activeTestController.signal,
+        sessionScreenshotsDir,
+        activeTestController?.signal,
       );
 
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
         await serializer.saveTest(lastRunPath);
-        mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration });
+        
+        // Generate markdown report
+        const testData = serializer.getTest();
+        if (testData) {
+          const reportFileName = path.basename(suitePath).replace(".json", ".report.md");
+          await generateMarkdownReport(testData, suitesDir, reportFileName);
+        }
+
+        mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration, suitePath });
       }
     } catch (error: any) {
       console.error("Test execution failed:", error);
@@ -237,6 +290,16 @@ app.whenReady().then(() => {
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("get-suite-report", async (event, suitePath) => {
+    try {
+      const reportPath = suitePath.replace(".json", ".report.md");
+      const content = await fs.readFile(reportPath, "utf-8");
+      return content;
+    } catch (error: any) {
+      return `### Report not found\n\nCould not load report for ${suitePath}`;
     }
   });
 

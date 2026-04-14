@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   listSuites: () => ipcRenderer.invoke('list-suites'),
   getSuite: (suitePath: string) => ipcRenderer.invoke('get-suite', suitePath),
+  getSuiteReport: (suitePath: string) => ipcRenderer.invoke('get-suite-report', suitePath),
   deleteSuite: (suitePath: string) => ipcRenderer.invoke('delete-suite', suitePath),
   onTestStep: (callback: (step: any) => void) => {
     const subscription = (event: any, step: any) => callback(step);

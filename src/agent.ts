@@ -107,6 +107,7 @@ export async function runAgent(
   onGoalReached?: (checklist: Checklist) => Promise<GoalReachedResult>,
   onPlanning?: (isPlanning: boolean) => void,
   onManualPause?: (checklist: Checklist) => Promise<ManualPauseResult>,
+  screenshotsDir?: string,
   signal?: AbortSignal,
 ) {
   const history: AgentHistoryMessage[] = [];
@@ -157,6 +158,14 @@ export async function runAgent(
       const { text: snapshot, axTree, refs } = await browser.getSnapshotForLLM(false, false, fullSnapshot);
       const currentUrl = browser.page?.url() || "";
       const screenshot = await browser.page?.screenshot({ type: "jpeg", quality: 80 });
+      let screenshotPath = "";
+
+      if (screenshot && screenshotsDir) {
+        const screenshotFileName = `step-${stepCounter}.jpg`;
+        const fullPath = path.join(screenshotsDir, screenshotFileName);
+        await fs.writeFile(fullPath, screenshot);
+        screenshotPath = `media://${fullPath}`;
+      }
 
       if (artifactsDir) {
         await saveStepArtifacts(artifactsDir, stepCounter, snapshot, axTree, refs, browser, history, checklist);
@@ -196,8 +205,8 @@ export async function runAgent(
 
       if (checklist.isGoalAchieved) {
         if (onGoalReached) {
-          if (screenshot) {
-            checklist.screenshot = screenshot.toString("base64");
+          if (screenshot && screenshotsDir) {
+            checklist.screenshot = screenshotPath;
           }
           console.log(`[Agent] Goal achieved. Requesting human validation...`);
           const validationResult = await onGoalReached(checklist);
@@ -225,7 +234,7 @@ export async function runAgent(
           duration: `${((Date.now() - planningStartTime) / 1000).toFixed(1)}s`,
           description: `Strategic focus: ${currentTask.description}`,
           stateDescription: checklist.currentStateDescription,
-          screenshot: screenshot?.toString('base64')
+          screenshot: screenshotPath
         });
       }
       if (onPlanning) onPlanning(false);
@@ -325,7 +334,7 @@ export async function runAgent(
             duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
             description: executionResponse.intendedActionDescription,
             stateDescription: executionResponse.currentStateDescription,
-            screenshot: screenshot?.toString('base64'),
+            screenshot: screenshotPath,
             action
           });
 
@@ -342,12 +351,22 @@ export async function runAgent(
               stateDescription: executionResponse.currentStateDescription,
               actionIntent: executionResponse.intendedActionDescription,
               taskId: currentTaskId,
+              stateSnapshot: screenshotPath,
             });
             await serializer.saveTest();
           }
         }
       } catch (e: any) {
         console.error(`[Agent] Action failed: ${e.message}`);
+        
+        let errorScreenshotPath = "";
+        if (screenshot && screenshotsDir) {
+           const screenshotFileName = `step-${stepCounter}-error.jpg`;
+           const fullPath = path.join(screenshotsDir, screenshotFileName);
+           await fs.writeFile(fullPath, screenshot);
+           errorScreenshotPath = `media://${fullPath}`;
+        }
+
         if (onStep) {
           onStep({
             id: `exec-fail-${stepCounter}`,
@@ -357,7 +376,7 @@ export async function runAgent(
             duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
             description: `Action failed: ${executionResponse.intendedActionDescription}`,
             stateDescription: `ERROR: ${e.message}`,
-            screenshot: screenshot?.toString('base64'),
+            screenshot: errorScreenshotPath || "",
             action
           });
         }
@@ -438,7 +457,7 @@ export async function runAgent(
             duration: `${((Date.now() - verificationStartTime) / 1000).toFixed(1)}s`,
             description: assertionResponse.verificationReasoning,
             stateDescription: assertionResponse.currentStateDescription,
-            screenshot: afterActionScreenshot?.toString('base64')
+            screenshot: "" // Placeholder, or save to disk if needed. For now, empty is safer than base64.
           });
         }
 
