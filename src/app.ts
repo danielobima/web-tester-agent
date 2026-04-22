@@ -149,6 +149,12 @@ app.whenReady().then(async () => {
           });
         },
         sessionScreenshotsDir,
+        (issues) => {
+          if (mainWindow) mainWindow.webContents.send("test-issues", issues);
+        },
+        (usability) => {
+          if (mainWindow) mainWindow.webContents.send("test-usability", usability);
+        },
         activeTestController?.signal,
       );
 

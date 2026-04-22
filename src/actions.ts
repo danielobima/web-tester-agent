@@ -269,27 +269,44 @@ export const ActionSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("fill"),
       fields: z
-        .array(
-          z.object({
-            ref: z
-              .string()
-              .optional()
-              .describe("The 'ref' ID of the form field"),
-            role: z
-              .string()
-              .optional()
-              .describe("The ARIA role of the form field"),
-            name: z
-              .string()
-              .optional()
-              .describe("The accessible name of the form field"),
-            nth: z.number().optional().describe("The index if multiple match"),
-            type: z
-              .string()
-              .describe("The type of the field, usually 'textbox' or similar"),
-            value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+        .union([
+          z.array(
+            z.object({
+              ref: z
+                .string()
+                .optional()
+                .describe("The 'ref' ID of the form field"),
+              role: z
+                .string()
+                .optional()
+                .describe("The ARIA role of the form field"),
+              name: z
+                .string()
+                .optional()
+                .describe("The accessible name of the form field"),
+              nth: z
+                .number()
+                .optional()
+                .describe("The index if multiple match"),
+              type: z
+                .string()
+                .optional()
+                .describe("The type of the field, usually 'textbox' or similar"),
+              value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+            }),
+          ),
+          z.array(z.string()).transform((arr) => {
+            const fields = [];
+            for (let i = 0; i < arr.length; i += 2) {
+              fields.push({
+                ref: arr[i],
+                value: arr[i + 1],
+                type: "textbox",
+              });
+            }
+            return fields;
           }),
-        )
+        ])
         .describe("The fields and their exact values to fill out"),
       timeoutMs: z
         .number()
@@ -534,6 +551,18 @@ export const ExecutionResponseSchema = z.object({
     .describe(
       "A summary of what was accomplished during this task, if complete",
     ),
+  observedIssues: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "List of technical bugs or anomalies (e.g. 'ISSUE-1' to reference an existing one, or a string description for a new one).",
+    ),
+  usabilityFeedback: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "List of usability observations (e.g. 'USABILITY-1' to reference an existing one, or a string description for a new one).",
+    ),
 });
 
 export type ExecutionResponse = z.infer<typeof ExecutionResponseSchema>;
@@ -551,6 +580,18 @@ export const AssertionAgentResponseSchema = z.object({
   verificationReasoning: z
     .string()
     .describe("Rationale for why the task is or isn't verified"),
+  observedIssues: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "List of technical bugs or anomalies discovered during verification.",
+    ),
+  usabilityFeedback: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "List of usability observations discovered during verification.",
+    ),
 });
 
 export type AssertionAgentResponse = z.infer<

@@ -282,7 +282,7 @@ export async function fillFormViaPlaywright(opts: {
   const timeout = Math.max(500, Math.min(60_000, opts.timeoutMs ?? 8000));
   for (const field of opts.fields) {
     const refOpts = field.role ? field : requireRefOrRole({ ref: field.ref });
-    const type = field.type?.trim();
+    const type = field.type?.trim() || "textbox";
     const rawValue = field.value;
     const value =
       typeof rawValue === "string"
@@ -290,7 +290,7 @@ export async function fillFormViaPlaywright(opts: {
         : typeof rawValue === "number" || typeof rawValue === "boolean"
           ? String(rawValue)
           : "";
-    if ((!refOpts.ref && !refOpts.role) || !type) {
+    if (!refOpts.ref && !refOpts.role) {
       continue;
     }
     const locator = await refLocator(page, refOpts);

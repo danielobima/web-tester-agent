@@ -91,6 +91,8 @@ export interface AgentStepUpdate {
   error?: string;
   screenshot?: string;
   action?: any;
+  observedIssues?: string[];
+  usabilityFeedback?: string[];
 }
 
 export async function runAgent(
@@ -108,6 +110,8 @@ export async function runAgent(
   onPlanning?: (isPlanning: boolean) => void,
   onManualPause?: (checklist: Checklist) => Promise<ManualPauseResult>,
   screenshotsDir?: string,
+  onIssuesUpdate?: (issues: any[]) => void,
+  onUsabilityUpdate?: (usability: any[]) => void,
   signal?: AbortSignal,
 ) {
   const history: AgentHistoryMessage[] = [];
@@ -249,7 +253,16 @@ export async function runAgent(
         lastTaskId = currentTaskId;
       }
 
-      const executionPrompt = executionPromptTemplate.replace("{taskDescription}", currentTask.description).replace("{overallGoal}", requirement);
+      const knownIssuesText = (serializer && serializer.getTest()?.issues.length) 
+        ? `\n\nPreviously Identified Issues:\n${serializer.getTest()?.issues.map(i => `- ${i.id}: ${i.description}`).join('\n')}`
+        : "";
+      const knownUsabilityText = (serializer && serializer.getTest()?.usability.length)
+        ? `\n\nPreviously Identified Usability Feedback:\n${serializer.getTest()?.usability.map(u => `- ${u.id}: ${u.description}`).join('\n')}`
+        : "";
+
+      const executionPrompt = executionPromptTemplate
+        .replace("{taskDescription}", currentTask.description)
+        .replace("{overallGoal}", requirement) + knownIssuesText + knownUsabilityText;
       let executionResponse: ExecutionResponse | undefined;
       let retries = 0;
       const maxRetries = 3;
@@ -335,14 +348,16 @@ export async function runAgent(
             description: executionResponse.intendedActionDescription,
             stateDescription: executionResponse.currentStateDescription,
             screenshot: screenshotPath,
-            action
+            action,
+            observedIssues: executionResponse.observedIssues,
+            usabilityFeedback: executionResponse.usabilityFeedback,
           });
 
           history.push({ 
             role: "assistant", 
             content: [{ 
               type: "text", 
-              text: `Observation: ${executionResponse.currentStateDescription}\nAction: ${executionResponse.intendedActionDescription}` 
+              text: `Observation: ${executionResponse.currentStateDescription}\nAction: ${executionResponse.intendedActionDescription}${executionResponse.observedIssues && executionResponse.observedIssues.length > 0 ? `\nIssues: ${executionResponse.observedIssues.join(", ")}` : ""}${executionResponse.usabilityFeedback && executionResponse.usabilityFeedback.length > 0 ? `\nFeedback: ${executionResponse.usabilityFeedback.join(", ")}` : ""}` 
             }] 
           });
           
@@ -352,7 +367,11 @@ export async function runAgent(
               actionIntent: executionResponse.intendedActionDescription,
               taskId: currentTaskId,
               stateSnapshot: screenshotPath,
+              observedIssues: executionResponse.observedIssues,
+              usabilityFeedback: executionResponse.usabilityFeedback,
             });
+            if (onIssuesUpdate) onIssuesUpdate(serializer.getTest()?.issues || []);
+            if (onUsabilityUpdate) onUsabilityUpdate(serializer.getTest()?.usability || []);
             await serializer.saveTest();
           }
         }
@@ -457,19 +476,32 @@ export async function runAgent(
             duration: `${((Date.now() - verificationStartTime) / 1000).toFixed(1)}s`,
             description: assertionResponse.verificationReasoning,
             stateDescription: assertionResponse.currentStateDescription,
-            screenshot: "" // Placeholder, or save to disk if needed. For now, empty is safer than base64.
+            screenshot: "", // Placeholder, or save to disk if needed. For now, empty is safer than base64.
+            observedIssues: assertionResponse.observedIssues,
+            usabilityFeedback: assertionResponse.usabilityFeedback,
           });
         }
 
-        if (serializer && assertionResponse.assertions.length > 0) {
-          serializer.logVerificationToLastStep(assertionResponse.assertions);
+        if (serializer) {
+          if (assertionResponse.assertions.length > 0) {
+            serializer.logVerificationToLastStep(assertionResponse.assertions);
+          }
+          if (assertionResponse.observedIssues || assertionResponse.usabilityFeedback) {
+            serializer.logFindings(
+              `step-${stepCounter}`,
+              assertionResponse.observedIssues,
+              assertionResponse.usabilityFeedback
+            );
+            if (onIssuesUpdate) onIssuesUpdate(serializer.getTest()?.issues || []);
+            if (onUsabilityUpdate) onUsabilityUpdate(serializer.getTest()?.usability || []);
+          }
         }
 
         history.push({ 
           role: "assistant", 
           content: [{ 
             type: "text" as const, 
-            text: `Verification for ${currentTaskId}: ${assertionResponse.isTaskVerified ? "SUCCESS" : "FAILED"}. Reasoning: ${assertionResponse.verificationReasoning}` 
+            text: `Verification Reasoning: ${assertionResponse.verificationReasoning}${assertionResponse.observedIssues && assertionResponse.observedIssues.length > 0 ? `\nIssues found during verify: ${assertionResponse.observedIssues.join(", ")}` : ""}` 
           }] 
         });
         if (history.length > 20) history.splice(0, 2);

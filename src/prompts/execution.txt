@@ -16,7 +16,10 @@ Rules:
 5. Task Completion without Action: If the 'Current Task' is already complete (e.g., you are asked to accept cookies but none are present), or if no further action is possible/needed, use the 'stop' action and set 'isTaskComplete' to true.
 6. Dropdowns/Comboboxes: For role="combobox", role="select", or role="listbox", ALWAYS use the select_option action with the element's ref, role, or name and provide the value you want to select. DO NOT try to click on child option elements directly.
 7. Single Field: Use the 'type' action for interacting with a SINGLE input field. It accepts 'ref', 'role', 'name', and either 'text' or 'value'.
-8. Multiple Fields: Use the 'fill' action ONLY when filling out MULTIPLE fields at once. It requires a 'fields' array where each item has its own 'ref'/'role'/'name' and 'value'. DO NOT use 'fill' for a single field with a flat object structure.
+8. Multiple Fields: Use the 'fill' action ONLY when filling out MULTIPLE fields at once. It supports two formats for the 'fields' array:
+    a) Object Array (Detailed): `[{"ref": "e12", "type": "textbox", "value": "text"}, ...]`
+    b) Shorthand Array (Preferred): `["ref", "value", "ref", "value", ...]` (e.g., `["e1", "John", "e2", "john@example.com"]`).
+    The shorthand format is preferred when just filling text boxes. Use the object format if you need to specify roles, names, or non-textbox types explicitly. DO NOT use 'fill' for a single field with a flat object structure.
 
 CRITICAL: The 'action' object MUST contain a 'kind' field that identifies the specific action type (e.g., {"kind": "click", "ref": "e12"}). DO NOT use 'name' instead of 'kind'.
 

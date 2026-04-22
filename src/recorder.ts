@@ -9,6 +9,18 @@ export interface HealingRecord {
   reason: string;
 }
 
+export interface Issue {
+  id: string;
+  description: string;
+  affectedStepIds: string[];
+}
+
+export interface UsabilityFeedback {
+  id: string;
+  description: string;
+  affectedStepIds: string[];
+}
+
 export interface TestStep {
   id: string;
   action: Action;
@@ -29,6 +41,8 @@ export interface SerializedTest {
   checklist?: Checklist;
   steps: TestStep[];
   originalSteps?: TestStep[];
+  issues: Issue[];
+  usability: UsabilityFeedback[];
 }
 
 export class TestSerializer {
@@ -42,6 +56,8 @@ export class TestSerializer {
       name,
       startUrl,
       steps: [],
+      issues: [],
+      usability: [],
     };
     this.stepCounter = 0;
   }
@@ -60,6 +76,8 @@ export class TestSerializer {
       taskId?: string;
       stateSnapshot?: string;
       axTree?: any;
+      observedIssues?: string[];
+      usabilityFeedback?: string[];
     },
   ) {
     if (!this.test) throw new Error("Test not started");
@@ -68,8 +86,9 @@ export class TestSerializer {
     // now that we observe the new state. This assumes logAction is called after the action
     // executes, but the result is observed in the NEXT step.
     // The user requested: 1. current state, 2. action attempted, 3. result of action.
+    const stepId = `step-${++this.stepCounter}`;
     this.test.steps.push({
-      id: `step-${++this.stepCounter}`,
+      id: stepId,
       action,
       stateDescription: options?.stateDescription,
       actionIntent: options?.actionIntent,
@@ -79,6 +98,93 @@ export class TestSerializer {
       stateSnapshot: options?.stateSnapshot,
       axTree: options?.axTree,
     });
+
+    if (options?.observedIssues) {
+      for (const issueContent of options.observedIssues) {
+        this.addOrUpdateIssue(issueContent, stepId);
+      }
+    }
+
+    if (options?.usabilityFeedback) {
+      for (const feedbackContent of options.usabilityFeedback) {
+        this.addOrUpdateUsability(feedbackContent, stepId);
+      }
+    }
+  }
+
+  logFindings(stepId: string, issues?: string[], usability?: string[]) {
+    if (!this.test) return;
+    if (issues) {
+      for (const content of issues) {
+        this.addOrUpdateIssue(content, stepId);
+      }
+    }
+    if (usability) {
+      for (const content of usability) {
+        this.addOrUpdateUsability(content, stepId);
+      }
+    }
+  }
+
+  private addOrUpdateIssue(content: string, stepId: string) {
+    if (!this.test) return;
+    
+    // Normalize content: some agents might return "ISSUE-1: Description"
+    let description = content;
+    let foundId: string | undefined;
+    
+    const idMatch = content.match(/^(ISSUE-\d+)(?::\s*(.*))?$/i);
+    if (idMatch) {
+      foundId = idMatch[1].toUpperCase();
+      description = idMatch[2] || foundId;
+    }
+
+    const existing = this.test.issues.find(
+      (i) => (foundId && i.id === foundId) || i.description.toLowerCase() === description.toLowerCase().trim()
+    );
+
+    if (existing) {
+      if (!existing.affectedStepIds.includes(stepId)) {
+        existing.affectedStepIds.push(stepId);
+      }
+    } else {
+      const newId = foundId || `ISSUE-${this.test.issues.length + 1}`;
+      this.test.issues.push({
+        id: newId,
+        description: description === newId ? "Untitled Issue" : description,
+        affectedStepIds: [stepId],
+      });
+    }
+  }
+
+  private addOrUpdateUsability(content: string, stepId: string) {
+    if (!this.test) return;
+
+    let description = content;
+    let foundId: string | undefined;
+
+    const idMatch = content.match(/^(USABILITY-\d+)(?::\s*(.*))?$/i);
+    if (idMatch) {
+      foundId = idMatch[1].toUpperCase();
+      description = idMatch[2] || foundId;
+    }
+
+    const existing = this.test.usability.find(
+      (u) => (foundId && u.id === foundId) || u.description.toLowerCase() === description.toLowerCase().trim()
+    );
+
+    if (existing) {
+      if (!existing.affectedStepIds.includes(stepId)) {
+        existing.affectedStepIds.push(stepId);
+      }
+    } else {
+      const newId = foundId || `USABILITY-${this.test.usability.length + 1}`;
+      this.test.usability.push({
+        id: newId,
+        description: description === newId ? "Untitled Feedback" : description,
+        affectedStepIds: [stepId],
+      });
+    }
   }
 
   updateChecklist(checklist: Checklist) {
