@@ -4,10 +4,21 @@ import { BrowserManager } from "./browser";
 /**
  * Concrete type for agent conversation history
  */
-export type AgentHistoryMessage = 
-  | { role: 'user'; content: string | Array<{ type: 'text'; text: string } | { type: 'image'; image: Buffer | string }> }
-  | { role: 'assistant'; content: string | Array<{ type: 'text'; text: string }> }
-  | { role: 'system'; content: string };
+export type AgentHistoryMessage =
+  | {
+      role: "user";
+      content:
+        | string
+        | Array<
+            | { type: "text"; text: string }
+            | { type: "image"; image: Buffer | string }
+          >;
+    }
+  | {
+      role: "assistant";
+      content: string | Array<{ type: "text"; text: string }>;
+    }
+  | { role: "system"; content: string };
 import {
   ChecklistSchema,
   ExecutionResponseSchema,
@@ -22,20 +33,20 @@ import * as path from "path";
 import { z } from "zod";
 import { evaluateAssertions } from "./replay";
 
-export type PlanApprovalResult = 
-  | { action: 'accept' }
-  | { action: 'modify', checklist: Checklist }
-  | { action: 'reject' };
+export type PlanApprovalResult =
+  | { action: "accept" }
+  | { action: "modify"; checklist: Checklist }
+  | { action: "reject" };
 
-export type GoalReachedResult = 
-  | { action: 'validate' }
-  | { action: 'prompt', feedback: string }
-  | { action: 'cancel' };
+export type GoalReachedResult =
+  | { action: "validate" }
+  | { action: "prompt"; feedback: string }
+  | { action: "cancel" };
 
-export type ManualPauseResult = 
-  | { action: 'resume' }
-  | { action: 'reprompt', feedback: string }
-  | { action: 'modify', checklist: Checklist };
+export type ManualPauseResult =
+  | { action: "resume" }
+  | { action: "reprompt"; feedback: string }
+  | { action: "modify"; checklist: Checklist };
 
 function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   if (!obj) return;
@@ -84,15 +95,16 @@ function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
 export interface AgentStepUpdate {
   id: string;
   step: string;
-  status: 'success' | 'failed' | 'pending';
+  status: "success" | "failed" | "pending";
   duration: string;
   description: string;
   stateDescription?: string;
   error?: string;
   screenshot?: string;
   action?: any;
-  observedIssues?: string[];
-  usabilityFeedback?: string[];
+  issues?: string[];
+  usability?: string[];
+  url?: string;
 }
 
 export async function runAgent(
@@ -121,15 +133,26 @@ export async function runAgent(
     currentStateDescription: "Starting test execution",
     tasks: [],
     isGoalAchieved: false,
+    issues: [],
+    usability: [],
   };
 
   if (artifactsDir) {
     await fs.mkdir(artifactsDir, { recursive: true });
   }
 
-  const planningPrompt = await fs.readFile(path.join(__dirname, "prompts", "planning.txt"), "utf-8");
-  const executionPromptTemplate = await fs.readFile(path.join(__dirname, "prompts", "execution.txt"), "utf-8");
-  const assertionPromptTemplate = await fs.readFile(path.join(__dirname, "prompts", "assertion.txt"), "utf-8");
+  const planningPrompt = await fs.readFile(
+    path.join(__dirname, "prompts", "planning.txt"),
+    "utf-8",
+  );
+  const executionPromptTemplate = await fs.readFile(
+    path.join(__dirname, "prompts", "execution.txt"),
+    "utf-8",
+  );
+  const assertionPromptTemplate = await fs.readFile(
+    path.join(__dirname, "prompts", "assertion.txt"),
+    "utf-8",
+  );
 
   let lastActionString = "";
   let consecutiveSameAction = 0;
@@ -144,24 +167,31 @@ export async function runAgent(
 
       if (onManualPause) {
         const pauseResult = await onManualPause(checklist);
-        if (pauseResult.action === 'reprompt') {
+        if (pauseResult.action === "reprompt") {
           requirement += `\nLatest User Feedback: ${pauseResult.feedback}`;
           checklist.isGoalAchieved = false;
           needsPlanApproval = true;
           // No break/continue needed here, it will naturally re-plan below
-        } else if (pauseResult.action === 'modify') {
+        } else if (pauseResult.action === "modify") {
           checklist = pauseResult.checklist;
           if (onChecklist) onChecklist(checklist);
           if (serializer) serializer.updateChecklist(checklist);
-          needsPlanApproval = false; // Usually if they manually modified it they don't want to re-approve immediately? 
-                                     // Actually, let's keep it false if they just modified it themselves.
+          needsPlanApproval = false; // Usually if they manually modified it they don't want to re-approve immediately?
+          // Actually, let's keep it false if they just modified it themselves.
         }
       }
 
       await browser.waitForStability();
-      const { text: snapshot, axTree, refs } = await browser.getSnapshotForLLM(false, false, fullSnapshot);
+      const {
+        text: snapshot,
+        axTree,
+        refs,
+      } = await browser.getSnapshotForLLM(false, false, fullSnapshot);
       const currentUrl = browser.page?.url() || "";
-      const screenshot = await browser.page?.screenshot({ type: "jpeg", quality: 80 });
+      const screenshot = await browser.page?.screenshot({
+        type: "jpeg",
+        quality: 80,
+      });
       let screenshotPath = "";
 
       if (screenshot && screenshotsDir) {
@@ -172,7 +202,16 @@ export async function runAgent(
       }
 
       if (artifactsDir) {
-        await saveStepArtifacts(artifactsDir, stepCounter, snapshot, axTree, refs, browser, history, checklist);
+        await saveStepArtifacts(
+          artifactsDir,
+          stepCounter,
+          snapshot,
+          axTree,
+          refs,
+          browser,
+          history,
+          checklist,
+        );
       }
 
       console.log(`[Agent][Planner] Planning...`);
@@ -183,25 +222,62 @@ export async function runAgent(
           model,
           schema: ChecklistSchema,
           system: planningPrompt,
-          messages: [...history, { role: "user", content: [{ type: "text" as const, text: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}` }, ...(screenshot ? [{ type: "image" as const, image: screenshot }] : [])] }],
+          messages: [
+            ...history,
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`,
+                },
+                ...(screenshot
+                  ? [{ type: "image" as const, image: screenshot }]
+                  : []),
+              ],
+            },
+          ],
         });
         checklist = planningResult.object;
         if (onChecklist) onChecklist(checklist);
         if (serializer) serializer.updateChecklist(checklist);
-        
+
         if (needsPlanApproval && onPlanApproval) {
           if (onPlanning) onPlanning(false);
           const approvalResult = await onPlanApproval(checklist);
-          if (approvalResult.action === 'reject') throw new Error("Plan rejected by user");
-          if (approvalResult.action === 'modify') {
+          if (approvalResult.action === "reject")
+            throw new Error("Plan rejected by user");
+          if (approvalResult.action === "modify") {
             checklist = approvalResult.checklist;
             if (onChecklist) onChecklist(checklist);
             if (serializer) serializer.updateChecklist(checklist);
           }
           needsPlanApproval = false;
         }
-        history.push({ role: "assistant", content: [{ type: "text" as const, text: `I am updating the plan. ${checklist.currentStateDescription}. ${checklist.tasks.length} tasks in total.` }] });
-        if (history.length > 20) history.splice(0, 2); 
+
+        // Safety: If no next task is found but the goal isn't marked as achieved, 
+        // check if all existing tasks are finished. If so, treat it as goal completion.
+        const allTasksFinished = checklist.tasks.length > 0 && checklist.tasks.every(t => t.status === "completed" || t.status === "failed");
+        if (!checklist.nextTaskId && !checklist.isGoalAchieved && allTasksFinished) {
+          console.log("[Agent] Implicit goal achievement detected (all tasks finished).");
+          checklist.isGoalAchieved = true;
+        }
+
+        if (!checklist.isGoalAchieved) {
+          history.push({
+            role: "assistant",
+            content: [
+              {
+                type: "text" as const,
+                text: `I am updating the plan. ${checklist.currentStateDescription}. ${checklist.tasks.length} tasks in total.`,
+              },
+            ],
+          });
+          if (history.length > 20) history.splice(0, 2);
+        }
+        if (checklist.isGoalAchieved) {
+          console.log(`[Agent] Planner indicates goal achieved: ${checklist.currentStateDescription}`);
+        }
       } catch (e: any) {
         if (onPlanning) onPlanning(false);
         console.error(`[Agent][Planner] Planning failed: ${e.message}`);
@@ -212,12 +288,27 @@ export async function runAgent(
           if (screenshot && screenshotsDir) {
             checklist.screenshot = screenshotPath;
           }
+          if (serializer) {
+            checklist.issues =
+              serializer.getTest()?.issues.map((i) => ({
+                id: i.id,
+                description: i.description,
+              })) || [];
+            checklist.usability =
+              serializer.getTest()?.usability.map((u) => ({
+                id: u.id,
+                description: u.description,
+              })) || [];
+          }
           console.log(`[Agent] Goal achieved. Requesting human validation...`);
           const validationResult = await onGoalReached(checklist);
-          if (validationResult.action === 'validate') break;
-          if (validationResult.action === 'cancel') throw new Error("Execution cancelled by user during validation");
-          if (validationResult.action === 'prompt') {
-            console.log(`[Agent] Human prompted further: ${validationResult.feedback}`);
+          if (validationResult.action === "validate") break;
+          if (validationResult.action === "cancel")
+            throw new Error("Execution cancelled by user during validation");
+          if (validationResult.action === "prompt") {
+            console.log(
+              `[Agent] Human prompted further: ${validationResult.feedback}`,
+            );
             requirement += `\nLatest User Feedback: ${validationResult.feedback}`;
             checklist.isGoalAchieved = false;
             needsPlanApproval = true; // Force re-approval of the next plan
@@ -234,16 +325,20 @@ export async function runAgent(
         onStep({
           id: `planning-${stepCounter}`,
           step: `Planning: ${currentTask.id}`,
-          status: 'success',
+          status: "success",
           duration: `${((Date.now() - planningStartTime) / 1000).toFixed(1)}s`,
           description: `Strategic focus: ${currentTask.description}`,
           stateDescription: checklist.currentStateDescription,
-          screenshot: screenshotPath
+          screenshot: screenshotPath,
+          url: currentUrl,
         });
       }
       if (onPlanning) onPlanning(false);
 
-      if (!currentTaskId || !currentTask) break;
+      if (!currentTaskId || !currentTask) {
+        console.log(`[Agent] No further tasks provided. Terminating loop.`);
+        break;
+      }
 
       if (currentTaskId !== lastTaskId) {
         currentTaskBeforeSnapshot = snapshot;
@@ -253,16 +348,40 @@ export async function runAgent(
         lastTaskId = currentTaskId;
       }
 
-      const knownIssuesText = (serializer && serializer.getTest()?.issues.length) 
-        ? `\n\nPreviously Identified Issues:\n${serializer.getTest()?.issues.map(i => `- ${i.id}: ${i.description}`).join('\n')}`
-        : "";
-      const knownUsabilityText = (serializer && serializer.getTest()?.usability.length)
-        ? `\n\nPreviously Identified Usability Feedback:\n${serializer.getTest()?.usability.map(u => `- ${u.id}: ${u.description}`).join('\n')}`
-        : "";
+      const knownIssuesText =
+        serializer && serializer.getTest()?.issues.length
+          ? `\n\nPreviously Identified Issues:\n${serializer
+              .getTest()
+              ?.issues.map((i) => `- ${i.id}: ${i.description}`)
+              .join("\n")}`
+          : "";
+      const knownUsabilityText =
+        serializer && serializer.getTest()?.usability.length
+          ? `\n\nPreviously Identified Usability Feedback:\n${serializer
+              .getTest()
+              ?.usability.map((u) => `- ${u.id}: ${u.description}`)
+              .join("\n")}`
+          : "";
 
-      const executionPrompt = executionPromptTemplate
-        .replace("{taskDescription}", currentTask.description)
-        .replace("{overallGoal}", requirement) + knownIssuesText + knownUsabilityText;
+      const consoleLogs = browser.consoleLogs
+        .map((l) => `[${l.type}] ${l.text}`)
+        .join("\n");
+      const networkErrors = browser.networkLogs
+        .filter((n) => n.status >= 400)
+        .map((n) => `[${n.method}] ${n.url} (${n.status})`)
+        .join("\n");
+      const technicalObservations =
+        consoleLogs || networkErrors
+          ? `\n\nTechnical Observations:\n${consoleLogs ? `Console Logs:\n${consoleLogs}\n` : ""}${networkErrors ? `Network Errors:\n${networkErrors}\n` : ""}`
+          : "";
+
+      const executionPrompt =
+        executionPromptTemplate
+          .replace("{taskDescription}", currentTask.description)
+          .replace("{overallGoal}", requirement) +
+        technicalObservations +
+        knownIssuesText +
+        knownUsabilityText;
       let executionResponse: ExecutionResponse | undefined;
       let retries = 0;
       const maxRetries = 3;
@@ -275,17 +394,19 @@ export async function runAgent(
             schema: ExecutionResponseSchema,
             system: executionPrompt,
             messages: [
-              ...history, 
-              { 
-                role: "user", 
+              ...history,
+              {
+                role: "user",
                 content: [
-                  { 
-                    type: "text" as const, 
-                    text: `Goal: ${requirement}\nTask: ${currentTask.description}\n\nCurrent State:\n${snapshot}${consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}` 
-                  }, 
-                  ...(screenshot ? [{ type: "image" as const, image: screenshot }] : [])
-                ] 
-              }
+                  {
+                    type: "text" as const,
+                    text: `Goal: ${requirement}\nTask: ${currentTask.description}\n\nCurrent State:\n${snapshot}${consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`,
+                  },
+                  ...(screenshot
+                    ? [{ type: "image" as const, image: screenshot }]
+                    : []),
+                ],
+              },
             ],
           });
           executionResponse = result.object;
@@ -294,31 +415,50 @@ export async function runAgent(
           retries++;
           let errorMessage = e.message;
           if (e.errors && Array.isArray(e.errors)) {
-            const details = e.errors.map((err: any) => `- ${err.path.join(".")}: ${err.message}`).join("\n");
+            const details = e.errors
+              .map((err: any) => `- ${err.path.join(".")}: ${err.message}`)
+              .join("\n");
             errorMessage = `Schema validation failed:\n${details}`;
-          } else if (errorMessage.includes("No object generated") && e.cause?.errors) {
-            const details = (e.cause.errors as any[]).map((err: any) => `- ${err.path.join(".")}: ${err.message}`).join("\n");
+          } else if (
+            errorMessage.includes("No object generated") &&
+            e.cause?.errors
+          ) {
+            const details = (e.cause.errors as any[])
+              .map((err: any) => `- ${err.path.join(".")}: ${err.message}`)
+              .join("\n");
             errorMessage = `Schema validation failed:\n${details}`;
           }
 
-          console.warn(`[Agent][Executor] Execution schema validation failed (Attempt ${retries}/${maxRetries}): ${errorMessage}`);
-          history.push({ 
-            role: "assistant", 
-            content: [{ type: "text", text: e.text || JSON.stringify({ error: errorMessage }) }] 
+          console.warn(
+            `[Agent][Executor] Execution schema validation failed (Attempt ${retries}/${maxRetries}): ${errorMessage}\nfull error: ${JSON.stringify(e)}`,
+          );
+          history.push({
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: e.text || JSON.stringify({ error: errorMessage }),
+              },
+            ],
           });
-          history.push({ 
-            role: "user", 
-            content: [{ 
-              type: "text", 
-              text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease correct your output based on the ExecutionResponseSchema.` 
-            }] 
+          history.push({
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease correct your output based on the ExecutionResponseSchema.`,
+              },
+            ],
           });
 
           if (retries >= maxRetries) throw new Error(errorMessage);
         }
       }
 
-      if (!executionResponse) throw new Error("[Agent][Executor] Failed to generate a valid execution response.");
+      if (!executionResponse)
+        throw new Error(
+          "[Agent][Executor] Failed to generate a valid execution response.",
+        );
 
       const action = executionResponse.action;
       mapRefsToIdentifiers(action, refs);
@@ -326,96 +466,120 @@ export async function runAgent(
       const actionStr = JSON.stringify(action);
       if (actionStr === lastActionString) {
         consecutiveSameAction++;
-        if (consecutiveSameAction > 3) throw new Error(`Agent stuck in loop: repeated the same action 3 times: ${actionStr}`);
+        if (consecutiveSameAction > 3)
+          throw new Error(
+            `Agent stuck in loop: repeated the same action 3 times: ${actionStr}`,
+          );
       } else {
         lastActionString = actionStr;
         consecutiveSameAction = 0;
       }
 
-      try {
-        await browser.execute(action);
+      if (action.kind === "stop" || action.kind === "none") {
+        console.log(
+          `[Agent][Executor] Task completion indicated via ${action.kind}.`,
+        );
+        executionResponse.isTaskComplete = true;
+      } else {
+        try {
+          await browser.execute(action);
 
-        if (onStep) {
-          if (serializer && executionResponse.previousActionResult) {
-            serializer.updatePreviousResult(executionResponse.previousActionResult);
-          }
-          
-          onStep({
-            id: `exec-${stepCounter}`,
-            step: `Executing: ${action.kind}`,
-            status: 'success',
-            duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
-            description: executionResponse.intendedActionDescription,
-            stateDescription: executionResponse.currentStateDescription,
-            screenshot: screenshotPath,
-            action,
-            observedIssues: executionResponse.observedIssues,
-            usabilityFeedback: executionResponse.usabilityFeedback,
-          });
+          if (onStep) {
+            if (serializer && executionResponse.previousActionResult) {
+              serializer.updatePreviousResult(
+                executionResponse.previousActionResult,
+              );
+            }
 
-          history.push({ 
-            role: "assistant", 
-            content: [{ 
-              type: "text", 
-              text: `Observation: ${executionResponse.currentStateDescription}\nAction: ${executionResponse.intendedActionDescription}${executionResponse.observedIssues && executionResponse.observedIssues.length > 0 ? `\nIssues: ${executionResponse.observedIssues.join(", ")}` : ""}${executionResponse.usabilityFeedback && executionResponse.usabilityFeedback.length > 0 ? `\nFeedback: ${executionResponse.usabilityFeedback.join(", ")}` : ""}` 
-            }] 
-          });
-          
-          if (serializer) {
-            serializer.logAction(action, {
+            onStep({
+              id: `exec-${stepCounter}`,
+              step: `Executing: ${action.kind}`,
+              status: "success",
+              duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
+              description: executionResponse.intendedActionDescription,
               stateDescription: executionResponse.currentStateDescription,
-              actionIntent: executionResponse.intendedActionDescription,
-              taskId: currentTaskId,
-              stateSnapshot: screenshotPath,
-              observedIssues: executionResponse.observedIssues,
-              usabilityFeedback: executionResponse.usabilityFeedback,
+              screenshot: screenshotPath,
+              action,
+              issues: executionResponse.issues,
+              usability: executionResponse.usability,
+              url: browser.page?.url() || "",
             });
-            if (onIssuesUpdate) onIssuesUpdate(serializer.getTest()?.issues || []);
-            if (onUsabilityUpdate) onUsabilityUpdate(serializer.getTest()?.usability || []);
-            await serializer.saveTest();
-          }
-        }
-      } catch (e: any) {
-        console.error(`[Agent] Action failed: ${e.message}`);
-        
-        let errorScreenshotPath = "";
-        if (screenshot && screenshotsDir) {
-           const screenshotFileName = `step-${stepCounter}-error.jpg`;
-           const fullPath = path.join(screenshotsDir, screenshotFileName);
-           await fs.writeFile(fullPath, screenshot);
-           errorScreenshotPath = `media://${fullPath}`;
-        }
 
-        if (onStep) {
-          onStep({
-            id: `exec-fail-${stepCounter}`,
-            step: `Failed: ${action.kind}`,
-            status: 'failed',
-            error: e.message,
-            duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
-            description: `Action failed: ${executionResponse.intendedActionDescription}`,
-            stateDescription: `ERROR: ${e.message}`,
-            screenshot: errorScreenshotPath || "",
-            action
+            history.push({
+              role: "assistant",
+              content: [
+                {
+                  type: "text",
+                  text: `Observation: ${executionResponse.currentStateDescription}\nAction: ${executionResponse.intendedActionDescription}${executionResponse.issues && executionResponse.issues.length > 0 ? `\nIssues: ${executionResponse.issues.join(", ")}` : ""}${executionResponse.usability && executionResponse.usability.length > 0 ? `\nFeedback: ${executionResponse.usability.join(", ")}` : ""}`,
+                },
+              ],
+            });
+
+            if (serializer) {
+              serializer.logAction(action, {
+                stateDescription: executionResponse.currentStateDescription,
+                actionIntent: executionResponse.intendedActionDescription,
+                taskId: currentTaskId,
+                stateSnapshot: screenshotPath,
+                issues: executionResponse.issues,
+                usability: executionResponse.usability,
+              });
+              if (onIssuesUpdate)
+                onIssuesUpdate(serializer.getTest()?.issues || []);
+              if (onUsabilityUpdate)
+                onUsabilityUpdate(serializer.getTest()?.usability || []);
+              await serializer.saveTest();
+            }
+          }
+        } catch (e: any) {
+          console.error(`[Agent] Action failed: ${e.message}`);
+
+          let errorScreenshotPath = "";
+          if (screenshot && screenshotsDir) {
+            const screenshotFileName = `step-${stepCounter}-error.jpg`;
+            const fullPath = path.join(screenshotsDir, screenshotFileName);
+            await fs.writeFile(fullPath, screenshot);
+            errorScreenshotPath = `media://${fullPath}`;
+          }
+
+          if (onStep) {
+            onStep({
+              id: `exec-fail-${stepCounter}`,
+              step: `Failed: ${action.kind}`,
+              status: "failed",
+              error: e.message,
+              duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
+              description: `Action failed: ${executionResponse.intendedActionDescription}`,
+              stateDescription: `ERROR: ${e.message}`,
+              screenshot: errorScreenshotPath || "",
+              action,
+              url: browser.page?.url() || "",
+            });
+          }
+          history.push({
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `ACTION FAILED: ${e.message}. Please try a different approach (e.g., look for alternative selectors, scroll, or wait).`,
+              },
+            ],
           });
+          if (history.length > 20) history.splice(0, 2);
+          stepCounter++;
+          continue; // RE-PLAN with error context
         }
-        history.push({ 
-          role: "user", 
-          content: [{ 
-            type: "text", 
-            text: `ACTION FAILED: ${e.message}. Please try a different approach (e.g., look for alternative selectors, scroll, or wait).` 
-          }] 
-        });
-        if (history.length > 20) history.splice(0, 2);
-        stepCounter++;
-        continue; // RE-PLAN with error context
       }
 
       if (executionResponse.isTaskComplete) {
         await browser.waitForStability();
-        const { text: afterSnapshot, refs: afterRefs } = await browser.getSnapshotForLLM(false, false, fullSnapshot);
+        const { text: afterSnapshot, refs: afterRefs } =
+          await browser.getSnapshotForLLM(false, false, fullSnapshot);
         const afterUrl = browser.page?.url() || "";
-        const afterActionScreenshot = await browser.page?.screenshot({ type: "jpeg", quality: 80 });
+        const afterActionScreenshot = await browser.page?.screenshot({
+          type: "jpeg",
+          quality: 80,
+        });
 
         const verificationStartTime = Date.now();
         let assertionRetries = 0;
@@ -429,32 +593,68 @@ export async function runAgent(
               schema: AssertionAgentResponseSchema,
               system: assertionPromptTemplate,
               messages: [
-                { 
-                  role: "user" as const, 
+                {
+                  role: "user" as const,
                   content: [
-                    { 
-                      type: "text" as const, 
-                      text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}` 
-                    }, 
-                    ...(currentTaskBeforeScreenshot ? [{ type: "image" as const, image: currentTaskBeforeScreenshot }] : []),
-                    ...(afterActionScreenshot ? [{ type: "image" as const, image: afterActionScreenshot }] : [])
-                  ] 
+                    {
+                      type: "text" as const,
+                      text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`,
+                    },
+                    ...(currentTaskBeforeScreenshot
+                      ? [
+                          {
+                            type: "image" as const,
+                            image: currentTaskBeforeScreenshot,
+                          },
+                        ]
+                      : []),
+                    ...(afterActionScreenshot
+                      ? [
+                          {
+                            type: "image" as const,
+                            image: afterActionScreenshot,
+                          },
+                        ]
+                      : []),
+                  ],
                 },
-                ...assertionHistory
+                ...assertionHistory,
               ],
             });
             assertionResponse = assertionResult.object;
-            
+
             if (assertionResponse.assertions.length > 0) {
-              for (const ass of assertionResponse.assertions) mapRefsToIdentifiers(ass, afterRefs);
-              console.log(`[Agent][Asserter] Executing generated assertions...`);
-              const { passed, failures } = await evaluateAssertions(assertionResponse.assertions, browser, afterRefs);
+              for (const ass of assertionResponse.assertions)
+                mapRefsToIdentifiers(ass, afterRefs);
+              console.log(
+                `[Agent][Asserter] Executing generated assertions...`,
+              );
+              const { passed, failures } = await evaluateAssertions(
+                assertionResponse.assertions,
+                browser,
+                afterRefs,
+              );
               assertionResponse.assertions = passed;
 
               if (failures.length > 0) {
-                console.error(`[Agent][Asserter] Assertions FAILED: ${failures.join("\n")}`);
-                assertionHistory.push({ role: "assistant", content: [{ type: "text", text: JSON.stringify(assertionResponse) }] });
-                assertionHistory.push({ role: "user", content: [{ type: "text", text: `The assertions you generated failed programmatic verification: ${failures.join("\n")}. Please generate different assertions that correctly reflect the actual task completion state.` }] });
+                console.error(
+                  `[Agent][Asserter] Assertions FAILED: ${failures.join("\n")}`,
+                );
+                assertionHistory.push({
+                  role: "assistant",
+                  content: [
+                    { type: "text", text: JSON.stringify(assertionResponse) },
+                  ],
+                });
+                assertionHistory.push({
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: `The assertions you generated failed programmatic verification: ${failures.join("\n")}. Please generate different assertions that correctly reflect the actual task completion state.`,
+                    },
+                  ],
+                });
                 assertionRetries++;
                 continue;
               }
@@ -462,23 +662,33 @@ export async function runAgent(
             break;
           } catch (e: any) {
             assertionRetries++;
-            assertionHistory.push({ role: "user", content: [{ type: "text", text: `Your previous response failed schema validation: ${e.message}. Please corrective-output a valid object.` }] });
+            assertionHistory.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `Your previous response failed schema validation: ${e.message}. Please corrective-output a valid object.`,
+                },
+              ],
+            });
           }
         }
 
-        if (!assertionResponse) throw new Error("Failed to verify task after 3 attempts.");
+        if (!assertionResponse)
+          throw new Error("Failed to verify task after 3 attempts.");
 
         if (onStep) {
           onStep({
             id: `verify-${stepCounter}`,
             step: `Verifying: ${currentTaskId}`,
-            status: assertionResponse.isTaskVerified ? 'success' : 'failed',
+            status: assertionResponse.isTaskVerified ? "success" : "failed",
             duration: `${((Date.now() - verificationStartTime) / 1000).toFixed(1)}s`,
             description: assertionResponse.verificationReasoning,
             stateDescription: assertionResponse.currentStateDescription,
             screenshot: "", // Placeholder, or save to disk if needed. For now, empty is safer than base64.
-            observedIssues: assertionResponse.observedIssues,
-            usabilityFeedback: assertionResponse.usabilityFeedback,
+            issues: assertionResponse.issues,
+            usability: assertionResponse.usability,
+            url: browser.page?.url() || "",
           });
         }
 
@@ -486,30 +696,37 @@ export async function runAgent(
           if (assertionResponse.assertions.length > 0) {
             serializer.logVerificationToLastStep(assertionResponse.assertions);
           }
-          if (assertionResponse.observedIssues || assertionResponse.usabilityFeedback) {
+          if (assertionResponse.issues || assertionResponse.usability) {
             serializer.logFindings(
               `step-${stepCounter}`,
-              assertionResponse.observedIssues,
-              assertionResponse.usabilityFeedback
+              assertionResponse.issues,
+              assertionResponse.usability,
             );
-            if (onIssuesUpdate) onIssuesUpdate(serializer.getTest()?.issues || []);
-            if (onUsabilityUpdate) onUsabilityUpdate(serializer.getTest()?.usability || []);
+            if (onIssuesUpdate)
+              onIssuesUpdate(serializer.getTest()?.issues || []);
+            if (onUsabilityUpdate)
+              onUsabilityUpdate(serializer.getTest()?.usability || []);
           }
         }
 
-        history.push({ 
-          role: "assistant", 
-          content: [{ 
-            type: "text" as const, 
-            text: `Verification Reasoning: ${assertionResponse.verificationReasoning}${assertionResponse.observedIssues && assertionResponse.observedIssues.length > 0 ? `\nIssues found during verify: ${assertionResponse.observedIssues.join(", ")}` : ""}` 
-          }] 
+        history.push({
+          role: "assistant",
+          content: [
+            {
+              type: "text" as const,
+              text: `Verification Reasoning: ${assertionResponse.verificationReasoning}${assertionResponse.issues && assertionResponse.issues.length > 0 ? `\nIssues found during verify: ${assertionResponse.issues.join(", ")}` : ""}`,
+            },
+          ],
         });
         if (history.length > 20) history.splice(0, 2);
 
-        const tIdx = checklist.tasks.findIndex(t => t.id === currentTaskId);
+        const tIdx = checklist.tasks.findIndex((t) => t.id === currentTaskId);
         if (tIdx !== -1) {
-          checklist.tasks[tIdx].status = assertionResponse.isTaskVerified ? "completed" : "pending";
-          checklist.tasks[tIdx].result = assertionResponse.verificationReasoning;
+          checklist.tasks[tIdx].status = assertionResponse.isTaskVerified
+            ? "completed"
+            : "pending";
+          checklist.tasks[tIdx].result =
+            assertionResponse.verificationReasoning;
           if (onChecklist) onChecklist(checklist);
         }
       }
@@ -529,11 +746,36 @@ export async function runAgent(
   }
 }
 
-async function saveStepArtifacts(dir: string, step: number, snapshot: string, axTree: any, refs: any, browser: BrowserManager, history: any[], checklist: Checklist) {
+async function saveStepArtifacts(
+  dir: string,
+  step: number,
+  snapshot: string,
+  axTree: any,
+  refs: any,
+  browser: BrowserManager,
+  history: any[],
+  checklist: Checklist,
+) {
   await fs.writeFile(path.join(dir, `step-${step}-snapshot.txt`), snapshot);
-  if (axTree) await fs.writeFile(path.join(dir, `step-${step}-axtree.json`), JSON.stringify(axTree, null, 2));
-  await fs.writeFile(path.join(dir, `step-${step}-refs.json`), JSON.stringify(refs, null, 2));
-  await fs.writeFile(path.join(dir, `step-${step}-checklist.json`), JSON.stringify(checklist, null, 2));
-  await fs.writeFile(path.join(dir, `step-${step}-history.json`), JSON.stringify(history, null, 2));
-  if (browser.page) await browser.page.screenshot({ path: path.join(dir, `step-${step}-screenshot.png`) });
+  if (axTree)
+    await fs.writeFile(
+      path.join(dir, `step-${step}-axtree.json`),
+      JSON.stringify(axTree, null, 2),
+    );
+  await fs.writeFile(
+    path.join(dir, `step-${step}-refs.json`),
+    JSON.stringify(refs, null, 2),
+  );
+  await fs.writeFile(
+    path.join(dir, `step-${step}-checklist.json`),
+    JSON.stringify(checklist, null, 2),
+  );
+  await fs.writeFile(
+    path.join(dir, `step-${step}-history.json`),
+    JSON.stringify(history, null, 2),
+  );
+  if (browser.page)
+    await browser.page.screenshot({
+      path: path.join(dir, `step-${step}-screenshot.png`),
+    });
 }

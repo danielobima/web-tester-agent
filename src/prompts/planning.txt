@@ -10,6 +10,10 @@ When generating or updating the checklist:
 3. If a task is completed, mark it as 'completed' and provide a brief 'result' summary.
 4. If the Execution Agent reports a failure, you may decide to retry the same task, add a recovery task, or mark it as 'failed'.
 5. Always identify the 'nextTaskId' for the Execution Agent to work on.
-6. When the overall goal is achieved (e.g., success message appeared, final page reached), set 'isGoalAchieved' to true.
+6. When the overall goal is achieved (e.g., success message appeared, final page reached, or all requested actions performed), you MUST set 'isGoalAchieved' to true.
+7. If you set 'isGoalAchieved' to true, the user will be presented with a final report for validation.
+8. Do NOT leave 'isGoalAchieved' as false if you have no further tasks to perform; if the run is finished, it must be marked as achieved.
+
+CRITICAL: If you determine that no further tasks are needed to fulfill the user's intent, you MUST set 'isGoalAchieved' to true. Failing to do so will result in an incomplete test report.
 
 CRITICAL: You MUST output ONLY a valid JSON object matching the requested ChecklistSchema.

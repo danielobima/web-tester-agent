@@ -12,6 +12,8 @@ export interface TestStep {
   error?: string;
   screenshot?: string;
   action?: any;
+  issues?: string[];
+  usability?: string[];
 }
 
 interface ExecutionStreamProps {
@@ -98,6 +100,12 @@ export const ExecutionStream = ({
                       {result.description}
                     </p>
 
+                    {result.url && (
+                      <div className="flex items-center gap-2 px-2 py-1 bg-on-surface/5 rounded text-[10px] text-on-surface/40 font-mono w-fit truncate max-w-full">
+                        <Icons.Globe /> {result.url}
+                      </div>
+                    )}
+
                     {result.screenshot && (
                       <div className="space-y-2">
                         <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-on-surface/30">
@@ -117,6 +125,34 @@ export const ExecutionStream = ({
                         <pre className="bg-on-surface/[0.03] p-3 rounded text-[11px] font-mono overflow-x-auto border border-on-surface/5">
                           {JSON.stringify(result.action, null, 2)}
                         </pre>
+                      </div>
+                    )}
+
+                    {result.issues && result.issues.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-orange-600">Identified Issues</div>
+                        <ul className="space-y-1.5">
+                          {result.issues.map((issue, idx) => (
+                            <li key={idx} className="flex gap-2 text-sm font-medium text-on-surface/80">
+                              <span className="text-orange-600 pt-1 text-xs">•</span>
+                              {issue}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {result.usability && result.usability.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-primary">Usability Feedback</div>
+                        <ul className="space-y-1.5">
+                          {result.usability.map((feedback, idx) => (
+                            <li key={idx} className="flex gap-2 text-sm font-medium text-on-surface/80">
+                              <span className="text-primary pt-1 text-xs">•</span>
+                              {feedback}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
 

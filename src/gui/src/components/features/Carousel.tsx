@@ -113,6 +113,42 @@ export const Carousel = ({ steps, activeIndex, onClose, onNavigate }: CarouselPr
                 </p>
              </div>
 
+             {currentStep.url && (
+                <div className="flex items-center gap-2 text-[10px] font-mono text-white/30 bg-white/5 px-2 py-1 rounded w-fit italic">
+                  <Icons.Globe /> {currentStep.url}
+                </div>
+             )}
+
+             {currentStep.issues && currentStep.issues.length > 0 && (
+                <div className="space-y-3 pt-2">
+                   <div className="flex items-center gap-2 text-[10px] font-bold text-orange-500 uppercase tracking-widest">
+                     <Icons.XCircle /> Identified Issues
+                   </div>
+                   <ul className="space-y-1.5">
+                      {currentStep.issues.map((issue, idx) => (
+                        <li key={idx} className="text-white/70 text-xs font-medium leading-relaxed border-l border-orange-500/30 pl-2">
+                          {issue}
+                        </li>
+                      ))}
+                   </ul>
+                </div>
+             )}
+
+             {currentStep.usability && currentStep.usability.length > 0 && (
+                <div className="space-y-3 pt-2">
+                   <div className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest">
+                     <Icons.Help /> Usability Feedback
+                   </div>
+                   <ul className="space-y-1.5">
+                      {currentStep.usability.map((feedback, idx) => (
+                        <li key={idx} className="text-white/70 text-xs font-medium leading-relaxed border-l border-primary/30 pl-2">
+                          {feedback}
+                        </li>
+                      ))}
+                   </ul>
+                </div>
+             )}
+
              {currentStep.action && (
                 <div className="space-y-3 pt-4">
                    <div className="flex items-center gap-2 text-[10px] font-bold text-white/40 uppercase tracking-widest">

@@ -23,6 +23,22 @@ export async function generateMarkdownReport(test: SerializedTest, reportDir: st
     md += `\n`;
   }
 
+  if (test.issues && test.issues.length > 0) {
+    md += `## Identified Technical Issues\n\n`;
+    for (const issue of test.issues) {
+      md += `- **${issue.id}:** ${issue.description} (Affected steps: ${issue.affectedStepIds.join(", ")})\n`;
+    }
+    md += `\n`;
+  }
+
+  if (test.usability && test.usability.length > 0) {
+    md += `## Usability Feedback\n\n`;
+    for (const feedback of test.usability) {
+      md += `- **${feedback.id}:** ${feedback.description} (Affected steps: ${feedback.affectedStepIds.join(", ")})\n`;
+    }
+    md += `\n`;
+  }
+
   md += `## Execution Sequence\n\n`;
 
   for (let i = 0; i < test.steps.length; i++) {

@@ -446,6 +446,13 @@ export const ActionSchema = z.discriminatedUnion("kind", [
     .describe(
       "Indicates that the current task is already complete or no action is required. Use this to skip a task without taking any visual action.",
     ),
+  z
+    .object({
+      kind: z.literal("none"),
+    })
+    .describe(
+      "Synonym for 'stop'. Indicates that no action is needed or the task is already in the desired state.",
+    ),
 ]);
 
 // Extract the inferred type to use across the project
@@ -526,6 +533,12 @@ export const ChecklistSchema = z.object({
     .string()
     .optional()
     .describe("Base64 encoded screenshot of the final state"),
+  issues: z
+    .array(z.object({ id: z.string(), description: z.string() }))
+    .default([]),
+  usability: z
+    .array(z.object({ id: z.string(), description: z.string() }))
+    .default([]),
 });
 
 export type Checklist = z.infer<typeof ChecklistSchema>;
@@ -551,15 +564,15 @@ export const ExecutionResponseSchema = z.object({
     .describe(
       "A summary of what was accomplished during this task, if complete",
     ),
-  observedIssues: z
+  issues: z
     .array(z.string())
-    .optional()
+    .default([])
     .describe(
       "List of technical bugs or anomalies (e.g. 'ISSUE-1' to reference an existing one, or a string description for a new one).",
     ),
-  usabilityFeedback: z
+  usability: z
     .array(z.string())
-    .optional()
+    .default([])
     .describe(
       "List of usability observations (e.g. 'USABILITY-1' to reference an existing one, or a string description for a new one).",
     ),
@@ -580,15 +593,15 @@ export const AssertionAgentResponseSchema = z.object({
   verificationReasoning: z
     .string()
     .describe("Rationale for why the task is or isn't verified"),
-  observedIssues: z
+  issues: z
     .array(z.string())
-    .optional()
+    .default([])
     .describe(
       "List of technical bugs or anomalies discovered during verification.",
     ),
-  usabilityFeedback: z
+  usability: z
     .array(z.string())
-    .optional()
+    .default([])
     .describe(
       "List of usability observations discovered during verification.",
     ),

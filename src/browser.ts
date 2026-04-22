@@ -35,6 +35,11 @@ export class BrowserManager {
     method: string;
     status: number;
   }[] = [];
+  public consoleLogs: {
+    type: string;
+    text: string;
+    location?: string;
+  }[] = [];
 
   // We need cdpUrl array and targetId for OpenClaw functions
   public cdpUrl: string = "";
@@ -63,6 +68,14 @@ export class BrowserManager {
         url: response.url(),
         method: response.request().method(),
         status: response.status(),
+      });
+    });
+
+    this.page.on("console", (message) => {
+      this.consoleLogs.push({
+        type: message.type(),
+        text: message.text(),
+        location: `${message.location().url}:${message.location().lineNumber}`,
       });
     });
 

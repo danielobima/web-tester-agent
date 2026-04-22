@@ -76,8 +76,8 @@ export class TestSerializer {
       taskId?: string;
       stateSnapshot?: string;
       axTree?: any;
-      observedIssues?: string[];
-      usabilityFeedback?: string[];
+      issues?: string[];
+      usability?: string[];
     },
   ) {
     if (!this.test) throw new Error("Test not started");
@@ -99,14 +99,14 @@ export class TestSerializer {
       axTree: options?.axTree,
     });
 
-    if (options?.observedIssues) {
-      for (const issueContent of options.observedIssues) {
+    if (options?.issues) {
+      for (const issueContent of options.issues) {
         this.addOrUpdateIssue(issueContent, stepId);
       }
     }
 
-    if (options?.usabilityFeedback) {
-      for (const feedbackContent of options.usabilityFeedback) {
+    if (options?.usability) {
+      for (const feedbackContent of options.usability) {
         this.addOrUpdateUsability(feedbackContent, stepId);
       }
     }
