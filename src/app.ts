@@ -29,6 +29,7 @@ const model = google("gemini-3.1-flash-lite-preview");
 
 function createWindow() {
   mainWindow = new BrowserWindow({
+    title: "Web Testing Agent",
     width: 1440,
     height: 900,
     webPreferences: {
