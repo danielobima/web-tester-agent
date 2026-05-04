@@ -497,6 +497,17 @@ export type Assertion = z.infer<typeof AssertionSchema>;
 
 // --- Multi-Agent Schemas ---
 
+export const IssueSeveritySchema = z.enum(["low", "medium", "high", "critical"]);
+export type IssueSeverity = z.infer<typeof IssueSeveritySchema>;
+
+export const IssueSchema = z.object({
+  id: z.string(),
+  description: z.string(),
+  severity: IssueSeveritySchema,
+});
+
+export type Issue = z.infer<typeof IssueSchema>;
+
 export const TaskSchema = z.object({
   id: z.string().describe("Unique identifier for the task"),
   description: z
@@ -533,12 +544,7 @@ export const ChecklistSchema = z.object({
     .string()
     .optional()
     .describe("Base64 encoded screenshot of the final state"),
-  issues: z
-    .array(z.object({ id: z.string(), description: z.string() }))
-    .default([]),
-  usability: z
-    .array(z.object({ id: z.string(), description: z.string() }))
-    .default([]),
+  issues: z.array(IssueSchema).default([]),
 });
 
 export type Checklist = z.infer<typeof ChecklistSchema>;
@@ -565,16 +571,15 @@ export const ExecutionResponseSchema = z.object({
       "A summary of what was accomplished during this task, if complete",
     ),
   issues: z
-    .array(z.string())
+    .array(
+      z.object({
+        description: z.string(),
+        severity: IssueSeveritySchema,
+      }),
+    )
     .default([])
     .describe(
-      "List of technical bugs or anomalies (e.g. 'ISSUE-1' to reference an existing one, or a string description for a new one).",
-    ),
-  usability: z
-    .array(z.string())
-    .default([])
-    .describe(
-      "List of usability observations (e.g. 'USABILITY-1' to reference an existing one, or a string description for a new one).",
+      "List of technical bugs, usability issues or anomalies found during this step.",
     ),
 });
 
@@ -594,16 +599,15 @@ export const AssertionAgentResponseSchema = z.object({
     .string()
     .describe("Rationale for why the task is or isn't verified"),
   issues: z
-    .array(z.string())
+    .array(
+      z.object({
+        description: z.string(),
+        severity: IssueSeveritySchema,
+      }),
+    )
     .default([])
     .describe(
-      "List of technical bugs or anomalies discovered during verification.",
-    ),
-  usability: z
-    .array(z.string())
-    .default([])
-    .describe(
-      "List of usability observations discovered during verification.",
+      "List of technical bugs or usability issues discovered during verification.",
     ),
 });
 

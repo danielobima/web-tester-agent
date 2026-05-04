@@ -3,6 +3,7 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { Header } from "./components/layout/Header";
 import { Dashboard } from "./pages/Dashboard";
 import { Suites } from "./pages/Suites";
+import { Execution } from "./pages/Execution";
 import { Icons } from "./components/ui/Icons";
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/suites" element={<Suites />} />
+            <Route path="/execution" element={<Execution />} />
             <Route path="*" element={<Dashboard />} />
           </Routes>
 

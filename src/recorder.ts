@@ -12,12 +12,7 @@ export interface HealingRecord {
 export interface Issue {
   id: string;
   description: string;
-  affectedStepIds: string[];
-}
-
-export interface UsabilityFeedback {
-  id: string;
-  description: string;
+  severity: "low" | "medium" | "high" | "critical";
   affectedStepIds: string[];
 }
 
@@ -32,6 +27,7 @@ export interface TestStep {
   healingHistory?: HealingRecord[];
   stateSnapshot?: string;
   axTree?: any;
+  issues?: { description: string; severity: "low" | "medium" | "high" | "critical" }[];
 }
 
 export interface SerializedTest {
@@ -42,7 +38,6 @@ export interface SerializedTest {
   steps: TestStep[];
   originalSteps?: TestStep[];
   issues: Issue[];
-  usability: UsabilityFeedback[];
 }
 
 export class TestSerializer {
@@ -57,7 +52,6 @@ export class TestSerializer {
       startUrl,
       steps: [],
       issues: [],
-      usability: [],
     };
     this.stepCounter = 0;
   }
@@ -76,16 +70,11 @@ export class TestSerializer {
       taskId?: string;
       stateSnapshot?: string;
       axTree?: any;
-      issues?: string[];
-      usability?: string[];
+      issues?: { description: string; severity: "low" | "medium" | "high" | "critical" }[];
     },
   ) {
     if (!this.test) throw new Error("Test not started");
 
-    // If there's a previous step, we can backfill the actionResult of the previous step
-    // now that we observe the new state. This assumes logAction is called after the action
-    // executes, but the result is observed in the NEXT step.
-    // The user requested: 1. current state, 2. action attempted, 3. result of action.
     const stepId = `step-${++this.stepCounter}`;
     this.test.steps.push({
       id: stepId,
@@ -97,91 +86,80 @@ export class TestSerializer {
       taskId: options?.taskId,
       stateSnapshot: options?.stateSnapshot,
       axTree: options?.axTree,
+      issues: options?.issues,
     });
 
     if (options?.issues) {
-      for (const issueContent of options.issues) {
-        this.addOrUpdateIssue(issueContent, stepId);
-      }
-    }
-
-    if (options?.usability) {
-      for (const feedbackContent of options.usability) {
-        this.addOrUpdateUsability(feedbackContent, stepId);
+      for (const issue of options.issues) {
+        this.addOrUpdateIssue(issue, stepId);
       }
     }
   }
 
-  logFindings(stepId: string, issues?: string[], usability?: string[]) {
+  logFindings(stepId: string, issues?: { description: string; severity: "low" | "medium" | "high" | "critical" }[]) {
     if (!this.test) return;
     if (issues) {
-      for (const content of issues) {
-        this.addOrUpdateIssue(content, stepId);
-      }
-    }
-    if (usability) {
-      for (const content of usability) {
-        this.addOrUpdateUsability(content, stepId);
+      for (const issue of issues) {
+        this.addOrUpdateIssue(issue, stepId);
       }
     }
   }
 
-  private addOrUpdateIssue(content: string, stepId: string) {
+  private normalize(text: string): string {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
+      .replace(/\s+/g, " ")
+      .split(" ")
+      .filter((w) => !["the", "a", "an"].includes(w))
+      .join(" ");
+  }
+
+  private addOrUpdateIssue(
+    issue: {
+      description: string;
+      severity: "low" | "medium" | "high" | "critical";
+    },
+    stepId: string,
+  ) {
     if (!this.test) return;
-    
-    // Normalize content: some agents might return "ISSUE-1: Description"
-    let description = content;
+
+    let description = issue.description.trim();
     let foundId: string | undefined;
-    
-    const idMatch = content.match(/^(ISSUE-\d+)(?::\s*(.*))?$/i);
+
+    // Check for explicit ISSUE-N pattern
+    const idMatch = description.match(/^(ISSUE-\d+)(?::\s*(.*))?$/i);
     if (idMatch) {
       foundId = idMatch[1].toUpperCase();
       description = idMatch[2] || foundId;
     }
 
+    const normDescription = this.normalize(description);
+
     const existing = this.test.issues.find(
-      (i) => (foundId && i.id === foundId) || i.description.toLowerCase() === description.toLowerCase().trim()
+      (i) =>
+        (foundId && i.id === foundId) ||
+        this.normalize(i.description) === normDescription,
     );
 
     if (existing) {
       if (!existing.affectedStepIds.includes(stepId)) {
         existing.affectedStepIds.push(stepId);
+      }
+      
+      // Keep description if it's more detailed? Or just keep original.
+      // take the higher severity?
+      const severityOrder = { low: 0, medium: 1, high: 2, critical: 3 };
+      if (severityOrder[issue.severity] > severityOrder[existing.severity]) {
+        existing.severity = issue.severity;
       }
     } else {
       const newId = foundId || `ISSUE-${this.test.issues.length + 1}`;
       this.test.issues.push({
         id: newId,
         description: description === newId ? "Untitled Issue" : description,
-        affectedStepIds: [stepId],
-      });
-    }
-  }
-
-  private addOrUpdateUsability(content: string, stepId: string) {
-    if (!this.test) return;
-
-    let description = content;
-    let foundId: string | undefined;
-
-    const idMatch = content.match(/^(USABILITY-\d+)(?::\s*(.*))?$/i);
-    if (idMatch) {
-      foundId = idMatch[1].toUpperCase();
-      description = idMatch[2] || foundId;
-    }
-
-    const existing = this.test.usability.find(
-      (u) => (foundId && u.id === foundId) || u.description.toLowerCase() === description.toLowerCase().trim()
-    );
-
-    if (existing) {
-      if (!existing.affectedStepIds.includes(stepId)) {
-        existing.affectedStepIds.push(stepId);
-      }
-    } else {
-      const newId = foundId || `USABILITY-${this.test.usability.length + 1}`;
-      this.test.usability.push({
-        id: newId,
-        description: description === newId ? "Untitled Feedback" : description,
+        severity: issue.severity,
         affectedStepIds: [stepId],
       });
     }

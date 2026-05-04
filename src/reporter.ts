@@ -24,19 +24,29 @@ export async function generateMarkdownReport(test: SerializedTest, reportDir: st
   }
 
   if (test.issues && test.issues.length > 0) {
-    md += `## Identified Technical Issues\n\n`;
-    for (const issue of test.issues) {
-      md += `- **${issue.id}:** ${issue.description} (Affected steps: ${issue.affectedStepIds.join(", ")})\n`;
-    }
-    md += `\n`;
-  }
+    md += `## Identified Findings\n\n`;
+    
+    const severityMap: Record<string, any[]> = {
+      critical: [],
+      high: [],
+      medium: [],
+      low: []
+    };
 
-  if (test.usability && test.usability.length > 0) {
-    md += `## Usability Feedback\n\n`;
-    for (const feedback of test.usability) {
-      md += `- **${feedback.id}:** ${feedback.description} (Affected steps: ${feedback.affectedStepIds.join(", ")})\n`;
+    for (const issue of test.issues) {
+      severityMap[issue.severity]?.push(issue);
     }
-    md += `\n`;
+
+    for (const severity of ["critical", "high", "medium", "low"]) {
+      const issues = severityMap[severity];
+      if (issues.length > 0) {
+        md += `### ${severity.toUpperCase()}\n`;
+        for (const issue of issues) {
+          md += `- **${issue.id}:** ${issue.description} (Affected steps: ${issue.affectedStepIds.join(", ")})\n`;
+        }
+        md += `\n`;
+      }
+    }
   }
 
   md += `## Execution Sequence\n\n`;

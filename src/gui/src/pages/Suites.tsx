@@ -72,7 +72,7 @@ export const Suites = () => {
 
   const handleReplay = (path: string) => {
     window.electron.replayTest(path);
-    navigate("/", { state: { replaying: true } });
+    navigate("/execution", { state: { replaying: true } });
   };
 
   const handleDelete = async (suite: Suite) => {

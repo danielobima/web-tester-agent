@@ -60,5 +60,10 @@ contextBridge.exposeInMainWorld('electron', {
     const subscription = (event: any, isPlanning: boolean) => callback(isPlanning);
     ipcRenderer.on('test-planning-state', subscription);
     return () => ipcRenderer.removeListener('test-planning-state', subscription);
+  },
+  onTestIssues: (callback: (issues: any[]) => void) => {
+    const subscription = (event: any, issues: any[]) => callback(issues);
+    ipcRenderer.on('test-issues', subscription);
+    return () => ipcRenderer.removeListener('test-issues', subscription);
   }
 });

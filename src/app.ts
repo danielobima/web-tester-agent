@@ -153,9 +153,6 @@ app.whenReady().then(async () => {
         (issues) => {
           if (mainWindow) mainWindow.webContents.send("test-issues", issues);
         },
-        (usability) => {
-          if (mainWindow) mainWindow.webContents.send("test-usability", usability);
-        },
         activeTestController?.signal,
       );
 

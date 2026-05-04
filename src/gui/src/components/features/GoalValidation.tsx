@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { Icons } from "../ui/Icons";
 
+interface Issue {
+  id: string;
+  description: string;
+  severity: "low" | "medium" | "high" | "critical";
+}
+
 interface Checklist {
   currentStateDescription: string;
   tasks: { id: string; description: string; status: string; result?: string }[];
   isGoalAchieved: boolean;
   screenshot?: string;
-  issues?: { id: string; description: string }[];
-  usability?: { id: string; description: string }[];
+  issues?: Issue[];
 }
 
 interface GoalValidationProps {
@@ -18,13 +23,23 @@ interface GoalValidationProps {
 export const GoalValidation = ({ checklist, onAction }: GoalValidationProps) => {
   const [feedback, setFeedback] = useState("");
 
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case "critical": return "text-red-600 border-red-600/30";
+      case "high": return "text-orange-600 border-orange-600/30";
+      case "medium": return "text-amber-600 border-amber-600/30";
+      case "low": return "text-blue-600 border-blue-600/30";
+      default: return "text-on-surface/40 border-on-surface/5";
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-on-surface/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
       <div className="bg-surface-lowest rounded-md shadow-ambient w-full max-w-2xl flex flex-col border border-on-surface/5 animate-in zoom-in-95 duration-200 overflow-hidden">
         {/* Header */}
         <div className="p-6 border-b border-on-surface/5 flex items-center justify-between bg-surface-low/50">
           <div>
-            <h2 className="text-2xl font-bold font-display tracking-tight">Test Completion Review</h2>
+            <h2 className="text-2xl font-bold font-display tracking-tight text-on-surface">Test Completion Review</h2>
             <p className="text-on-surface/50 text-xs font-medium uppercase tracking-widest mt-1">Senior QA Validation Phase</p>
           </div>
           <div className="p-3 bg-primary/10 text-primary rounded-md shadow-inner">
@@ -91,54 +106,37 @@ export const GoalValidation = ({ checklist, onAction }: GoalValidationProps) => 
               </div>
             </section>
 
-            {/* 4. Automated Findings (Issues & Usability) */}
+            {/* 4. Automated Findings (Unified) */}
             <section className="space-y-4">
                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-on-surface/30">
-                 <Icons.Dashboard /> Technical & Usability Report
+                 <Icons.Dashboard /> Automated Findings Report
                </div>
                
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Technical Issues */}
-                  <div className={`p-4 rounded-md border flex flex-col gap-3 ${checklist.issues?.length ? 'bg-orange-600/5 border-orange-600/10' : 'bg-surface-low/30 border-on-surface/5 opacity-40'}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-orange-600 flex items-center gap-2">
-                        <Icons.XCircle /> Technical Health
-                      </span>
-                      <span className="text-[10px] font-mono text-orange-600/50">{checklist.issues?.length || 0} issues</span>
-                    </div>
-                    {checklist.issues?.length ? (
-                      <ul className="space-y-2">
-                        {checklist.issues.map((i, idx) => (
-                          <li key={idx} className="text-[11px] font-medium text-on-surface/70 leading-relaxed border-l-2 border-orange-600/30 pl-2">
-                            {i.description}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-[11px] italic text-on-surface/40">No technical errors detected.</p>
-                    )}
+               <div className={`p-4 rounded-md border flex flex-col gap-3 ${checklist.issues?.length ? 'bg-surface-low/50 border-on-surface/10 shadow-inner' : 'bg-surface-low/30 border-on-surface/5 opacity-40'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface/60 flex items-center gap-2">
+                      <Icons.Bug /> Technical & UX Findings
+                    </span>
+                    <span className="text-[10px] font-bold text-primary">{checklist.issues?.length || 0} discovered</span>
                   </div>
-
-                  {/* Usability Findings */}
-                  <div className={`p-4 rounded-md border flex flex-col gap-3 ${checklist.usability?.length ? 'bg-primary/5 border-primary/10' : 'bg-surface-low/30 border-on-surface/5 opacity-40'}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-primary flex items-center gap-2">
-                        <Icons.Help /> UX Observations
-                      </span>
-                      <span className="text-[10px] font-mono text-primary/50">{checklist.usability?.length || 0} points</span>
+                  {checklist.issues?.length ? (
+                    <div className="space-y-2">
+                      {checklist.issues.map((i, idx) => (
+                        <div key={idx} className={`p-3 rounded border text-[11px] font-medium leading-relaxed flex flex-col gap-1 transition-all bg-white shadow-sm`}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-mono opacity-40 uppercase tracking-tighter">{i.id}</span>
+                            <span className={`text-[8px] font-bold uppercase tracking-widest px-1 border rounded ${getSeverityColor(i.severity)}`}>{i.severity}</span>
+                          </div>
+                          <p className="text-on-surface/80">{i.description}</p>
+                        </div>
+                      ))}
                     </div>
-                    {checklist.usability?.length ? (
-                      <ul className="space-y-2">
-                        {checklist.usability.map((u, idx) => (
-                          <li key={idx} className="text-[11px] font-medium text-on-surface/70 leading-relaxed border-l-2 border-primary/30 pl-2">
-                            {u.description}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-[11px] italic text-on-surface/40">No usability friction noted.</p>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="flex items-center gap-2 py-4 justify-center text-primary opacity-60">
+                      <Icons.CheckCircle />
+                      <p className="text-[11px] font-bold uppercase tracking-wider">No bugs or friction points detected</p>
+                    </div>
+                  )}
                </div>
             </section>
 
@@ -166,26 +164,27 @@ export const GoalValidation = ({ checklist, onAction }: GoalValidationProps) => 
         <div className="p-6 border-t border-on-surface/5 grid grid-cols-12 gap-3 bg-surface-low/50">
           <button 
             onClick={() => onAction("cancel")}
-            className="col-span-3 px-4 py-3 text-[10px] font-bold text-on-surface/40 hover:text-orange-600 transition-all hover:bg-orange-600/5 uppercase tracking-widest border border-on-surface/10 rounded-md"
+            className="col-span-3 px-4 py-3 text-[10px] font-bold text-on-surface/40 hover:text-red-600 transition-all hover:bg-red-600/5 uppercase tracking-widest border border-on-surface/10 rounded-md"
           >
             Abort Run
           </button>
           <button 
-            onClick={() => onAction("prompt", feedback)}
-            disabled={!feedback.trim()}
-            className={`col-span-4 px-4 py-3 rounded-md font-bold text-[10px] uppercase tracking-widest transition-all shadow-sm ${
+            onClick={() => feedback.trim() ? onAction("prompt", feedback) : onAction("validate")}
+            className={`col-span-9 px-4 py-3 rounded-md font-bold text-[10px] uppercase tracking-widest transition-all shadow-xl flex items-center justify-center gap-2 group ${
               feedback.trim() 
-                ? 'bg-primary/20 text-primary hover:bg-primary/30 border border-primary/20 cursor-pointer animate-in fade-in slide-in-from-right-1' 
-                : 'bg-on-surface/5 text-on-surface/20 border border-on-surface/10 cursor-not-allowed'
+                ? 'bg-primary/20 text-primary hover:bg-primary/30 border border-primary/20 animate-in fade-in slide-in-from-right-1' 
+                : 'bg-primary text-white hover:bg-primary/90 border border-primary/50 shadow-primary/20'
             }`}
           >
-            {feedback.trim() ? 'Cycle Further' : 'Enter Feedback'}
-          </button>
-          <button 
-            onClick={() => onAction("validate")}
-            className="col-span-5 px-4 py-3 bg-primary text-white rounded-md font-bold text-[10px] uppercase tracking-widest transition-all hover:bg-primary/90 shadow-xl shadow-primary/20 flex items-center justify-center gap-2 group border border-primary/50"
-          >
-            <Icons.CheckCircle /> Approve & Finish Report
+            {feedback.trim() ? (
+              <>
+                <Icons.Lightning /> Refine & Cycle Further
+              </>
+            ) : (
+              <>
+                <Icons.CheckCircle /> Approve & Finish Report
+              </>
+            )}
           </button>
         </div>
       </div>

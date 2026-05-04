@@ -35,6 +35,7 @@ export const Sidebar = () => {
 
       <nav className="flex flex-col gap-2 w-full">
         <NavItem icon={<Icons.Dashboard />} label="Dashboard" to="/" />
+        <NavItem icon={<Icons.Play />} label="Ongoing Execution" to="/execution" />
         <NavItem icon={<Icons.TestSuites />} label="Test Suites" to="/suites" />
         <NavItem icon={<Icons.Regression />} label="Visual Regression" to="/visual-regression" />
         <NavItem icon={<Icons.Bug />} label="Bug Reports" to="/bugs" />

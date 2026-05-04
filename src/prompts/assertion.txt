@@ -3,8 +3,7 @@ Your objective is to verify if a specific high-level Task has been successfully 
 
 Your output must include:
 - verificationReasoning: A concise explanation of why the task is or isn't verified.
-- issues: (Optional) List of any technical bugs, console errors, failed network requests, or UI glitches discovered during this check.
-- usability: (Optional) Observations about inconsistent patterns, confusing labels, or general usability friction.
+- issues: List of any technical bugs, console errors, failed network requests, or UI glitches discovered during this check. Each must have a description and `severity` (low, medium, high, critical). Consistency: If an issue was already reported, use the exact same description or its ID (e.g., `ISSUE-1: ...`).
 
 You have access to:
 1. BEFORE and AFTER textual snapshots of the DOM tree.

@@ -102,8 +102,7 @@ export interface AgentStepUpdate {
   error?: string;
   screenshot?: string;
   action?: any;
-  issues?: string[];
-  usability?: string[];
+  issues?: { description: string; severity: string }[];
   url?: string;
 }
 
@@ -123,7 +122,6 @@ export async function runAgent(
   onManualPause?: (checklist: Checklist) => Promise<ManualPauseResult>,
   screenshotsDir?: string,
   onIssuesUpdate?: (issues: any[]) => void,
-  onUsabilityUpdate?: (usability: any[]) => void,
   signal?: AbortSignal,
 ) {
   const history: AgentHistoryMessage[] = [];
@@ -134,7 +132,6 @@ export async function runAgent(
     tasks: [],
     isGoalAchieved: false,
     issues: [],
-    usability: [],
   };
 
   if (artifactsDir) {
@@ -293,11 +290,7 @@ export async function runAgent(
               serializer.getTest()?.issues.map((i) => ({
                 id: i.id,
                 description: i.description,
-              })) || [];
-            checklist.usability =
-              serializer.getTest()?.usability.map((u) => ({
-                id: u.id,
-                description: u.description,
+                severity: i.severity,
               })) || [];
           }
           console.log(`[Agent] Goal achieved. Requesting human validation...`);
@@ -352,14 +345,7 @@ export async function runAgent(
         serializer && serializer.getTest()?.issues.length
           ? `\n\nPreviously Identified Issues:\n${serializer
               .getTest()
-              ?.issues.map((i) => `- ${i.id}: ${i.description}`)
-              .join("\n")}`
-          : "";
-      const knownUsabilityText =
-        serializer && serializer.getTest()?.usability.length
-          ? `\n\nPreviously Identified Usability Feedback:\n${serializer
-              .getTest()
-              ?.usability.map((u) => `- ${u.id}: ${u.description}`)
+              ?.issues.map((i) => `- ${i.id} (${i.severity}): ${i.description}`)
               .join("\n")}`
           : "";
 
@@ -380,8 +366,7 @@ export async function runAgent(
           .replace("{taskDescription}", currentTask.description)
           .replace("{overallGoal}", requirement) +
         technicalObservations +
-        knownIssuesText +
-        knownUsabilityText;
+        knownIssuesText;
       let executionResponse: ExecutionResponse | undefined;
       let retries = 0;
       const maxRetries = 3;
@@ -389,6 +374,9 @@ export async function runAgent(
 
       while (retries < maxRetries) {
         try {
+          const currentIssues = serializer?.getTest()?.issues || checklist.issues || [];
+          const issuesSummary = currentIssues.map(i => `${i.id}: ${i.description}`).join("; ");
+
           const result = await generateObject({
             model,
             schema: ExecutionResponseSchema,
@@ -400,7 +388,7 @@ export async function runAgent(
                 content: [
                   {
                     type: "text" as const,
-                    text: `Goal: ${requirement}\nTask: ${currentTask.description}\n\nCurrent State:\n${snapshot}${consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`,
+                    text: `Goal: ${requirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`,
                   },
                   ...(screenshot
                     ? [{ type: "image" as const, image: screenshot }]
@@ -501,7 +489,6 @@ export async function runAgent(
               screenshot: screenshotPath,
               action,
               issues: executionResponse.issues,
-              usability: executionResponse.usability,
               url: browser.page?.url() || "",
             });
 
@@ -510,7 +497,7 @@ export async function runAgent(
               content: [
                 {
                   type: "text",
-                  text: `Observation: ${executionResponse.currentStateDescription}\nAction: ${executionResponse.intendedActionDescription}${executionResponse.issues && executionResponse.issues.length > 0 ? `\nIssues: ${executionResponse.issues.join(", ")}` : ""}${executionResponse.usability && executionResponse.usability.length > 0 ? `\nFeedback: ${executionResponse.usability.join(", ")}` : ""}`,
+                  text: `Observation: ${executionResponse.currentStateDescription}\nAction: ${executionResponse.intendedActionDescription}${executionResponse.issues && executionResponse.issues.length > 0 ? `\nIssues: ${executionResponse.issues.join(", ")}` : ""}`,
                 },
               ],
             });
@@ -522,12 +509,9 @@ export async function runAgent(
                 taskId: currentTaskId,
                 stateSnapshot: screenshotPath,
                 issues: executionResponse.issues,
-                usability: executionResponse.usability,
               });
               if (onIssuesUpdate)
                 onIssuesUpdate(serializer.getTest()?.issues || []);
-              if (onUsabilityUpdate)
-                onUsabilityUpdate(serializer.getTest()?.usability || []);
               await serializer.saveTest();
             }
           }
@@ -588,6 +572,9 @@ export async function runAgent(
 
         while (assertionRetries < 3) {
           try {
+            const currentIssues = serializer?.getTest()?.issues || checklist.issues || [];
+            const issuesSummary = currentIssues.map(i => `${i.id}: ${i.description}`).join("; ");
+
             const assertionResult = await generateObject({
               model,
               schema: AssertionAgentResponseSchema,
@@ -598,7 +585,7 @@ export async function runAgent(
                   content: [
                     {
                       type: "text" as const,
-                      text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`,
+                      text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`,
                     },
                     ...(currentTaskBeforeScreenshot
                       ? [
@@ -687,7 +674,6 @@ export async function runAgent(
             stateDescription: assertionResponse.currentStateDescription,
             screenshot: "", // Placeholder, or save to disk if needed. For now, empty is safer than base64.
             issues: assertionResponse.issues,
-            usability: assertionResponse.usability,
             url: browser.page?.url() || "",
           });
         }
@@ -696,16 +682,13 @@ export async function runAgent(
           if (assertionResponse.assertions.length > 0) {
             serializer.logVerificationToLastStep(assertionResponse.assertions);
           }
-          if (assertionResponse.issues || assertionResponse.usability) {
+          if (assertionResponse.issues) {
             serializer.logFindings(
               `step-${stepCounter}`,
               assertionResponse.issues,
-              assertionResponse.usability,
             );
             if (onIssuesUpdate)
               onIssuesUpdate(serializer.getTest()?.issues || []);
-            if (onUsabilityUpdate)
-              onUsabilityUpdate(serializer.getTest()?.usability || []);
           }
         }
 
