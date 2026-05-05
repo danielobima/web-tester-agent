@@ -187,8 +187,21 @@ export const ExecutionStream = ({
           {activeTab === "stream" ? `${results.length} steps executed` : `${issues.length} findings identified`}
         </div>
         {!isGenerating && results.length > 0 && (
-          <button onClick={onReplay} className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest hover:underline">
-            <Icons.TestSuites /> Replay Test
+          <button 
+            onClick={onReplay} 
+            className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest hover:underline transition-colors ${
+              results.some(r => r.status === 'failed') ? 'text-red-600 hover:text-red-700' : 'text-primary'
+            }`}
+          >
+            {results.some(r => r.status === 'failed') ? (
+              <>
+                <Icons.RotateCw /> Retry Execution
+              </>
+            ) : (
+              <>
+                <Icons.TestSuites /> Replay Test
+              </>
+            )}
           </button>
         )}
       </div>

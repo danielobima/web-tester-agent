@@ -32,6 +32,7 @@ export const Execution = () => {
   const [isViewingReport, setIsViewingReport] = useState(false);
   const [reportContent, setReportContent] = useState<string>("");
   const [issues, setIssues] = useState<any[]>([]);
+  const [hasFailed, setHasFailed] = useState(false);
 
   useEffect(() => {
     const unsubStep = window.electron.onTestStep((step: TestStep) => {
@@ -90,6 +91,9 @@ export const Execution = () => {
         setPendingPauseChecklist(null);
         if (result.success && result.suitePath) {
           setCompletedSuitePath(result.suitePath);
+        }
+        if (!result.success) {
+          setHasFailed(true);
         }
         setTestResults((prev) => [
           ...prev,
@@ -155,12 +159,14 @@ export const Execution = () => {
   };
 
   const handleReset = () => {
+    setHasFailed(false);
     navigate("/");
   };
 
   const handleReplay = () => {
     setTestResults([]);
     setTasks([]);
+    setHasFailed(false);
     setIsGenerating(true);
     setIsStopping(false);
     setIsViewingReport(false);
@@ -246,6 +252,14 @@ export const Execution = () => {
                     className="bg-primary text-white px-5 py-2 rounded-md font-bold text-[11px] uppercase tracking-wider shadow-ambient hover:opacity-90 transition-all flex items-center gap-2"
                   >
                     <Icons.TestSuites /> View Full Report
+                  </button>
+                )}
+                {hasFailed && !isGenerating && (
+                  <button
+                    onClick={handleReplay}
+                    className="bg-red-600 text-white px-5 py-2 rounded-md font-bold text-[11px] uppercase tracking-wider shadow-ambient hover:bg-red-700 transition-all flex items-center gap-2"
+                  >
+                    <Icons.RotateCw /> Retry Execution
                   </button>
                 )}
               </div>
