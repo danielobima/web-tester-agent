@@ -453,6 +453,53 @@ export const ActionSchema = z.discriminatedUnion("kind", [
     .describe(
       "Synonym for 'stop'. Indicates that no action is needed or the task is already in the desired state.",
     ),
+  z
+    .object({
+      kind: z.literal("switch_tab"),
+      targetId: z
+        .string()
+        .optional()
+        .describe("The targetId of the tab to switch to"),
+      title: z
+        .string()
+        .optional()
+        .describe(
+          "The title of the tab to switch to (only use if targetId is not known)",
+        ),
+      url: z
+        .string()
+        .optional()
+        .describe(
+          "The URL of the tab to switch to (only use if targetId is not known)",
+        ),
+    })
+    .describe("Switch focus to another open tab/window."),
+
+  z
+    .object({
+      kind: z.literal("list_tabs"),
+    })
+    .describe("List all currently open tabs and windows in the browser."),
+
+  z
+    .object({
+      kind: z.literal("close_tab"),
+      targetId: z
+        .string()
+        .optional()
+        .describe("The targetId of the tab to close (defaults to current)"),
+    })
+    .describe("Close a specific tab or window."),
+
+  z
+    .object({
+      kind: z.literal("new_tab"),
+      url: z
+        .string()
+        .optional()
+        .describe("Optional URL to navigate to in the new tab"),
+    })
+    .describe("Open a new blank tab or window."),
 ]);
 
 // Extract the inferred type to use across the project

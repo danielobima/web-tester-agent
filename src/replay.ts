@@ -174,6 +174,7 @@ async function heal(
   testGoal: string,
   model: LanguageModel,
   fullSnapshot?: boolean,
+  supportsVision?: boolean,
 ): Promise<Action> {
   console.log(
     `[Healer] Attempting to heal step: ${JSON.stringify(step.action)}`,
@@ -219,6 +220,7 @@ export async function replayTest(
   onChecklist?: (checklist: any) => void,
   onPlanning?: (isPlanning: boolean) => void,
   signal?: AbortSignal,
+  supportsVision?: boolean,
 ) {
   const serializer = new TestSerializer();
   const test = await serializer.loadTest(filePath);
@@ -301,7 +303,7 @@ export async function replayTest(
       console.error(`[Replay] ❌ Step ${i + 1} Failed: ${e.message}`);
 
       // Attempt Healing
-      const newAction = await heal(step, browser, e.message, test.name, model, fullSnapshot);
+      const newAction = await heal(step, browser, e.message, test.name, model, fullSnapshot, supportsVision);
 
       try {
         console.log(`[Replay] 🛠️ Executing healed action...`);

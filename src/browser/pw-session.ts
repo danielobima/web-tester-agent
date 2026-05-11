@@ -400,7 +400,7 @@ async function pageTargetId(page: Page): Promise<string | null> {
   }
 }
 
-async function findPageByTargetId(
+export async function findPageByTargetId(
   browser: Browser,
   targetId: string,
   cdpUrl?: string,
@@ -479,20 +479,23 @@ export async function getPageForTargetId(opts: {
   if (!pages.length) {
     throw new Error("No pages available in the connected browser.");
   }
-  const first = pages[0];
+
   const tid = opts.targetId === "root_target_id" ? undefined : opts.targetId;
   if (!tid) {
-    return first;
+    return pages[0];
   }
+
   const found = await findPageByTargetId(browser, tid, opts.cdpUrl);
   if (!found) {
-    // Extension relays can block CDP attachment APIs (e.g. Target.attachToBrowserTarget),
-    // which prevents us from resolving a page's targetId via newCDPSession(). If Playwright
-    // only exposes a single Page, use it as a best-effort fallback.
+    // If we can't find the exact targetId, but there is only one page, use it as fallback.
+    // This is helpful when targetIds change or are blocked by relays.
     if (pages.length === 1) {
-      return first;
+      return pages[0];
     }
-    throw new Error("tab not found");
+    
+    // Last resort: if we have a targetId but couldn't find it, maybe it's the first page
+    // and we just failed to resolve its ID.
+    return pages[0];
   }
   return found;
 }

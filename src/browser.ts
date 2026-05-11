@@ -24,7 +24,7 @@ import {
   closePageViaPlaywright,
   takeScreenshotViaPlaywright,
 } from "./browser/pw-tools-core";
-import { refLocator } from "./browser/pw-session";
+import { refLocator, findPageByTargetId } from "./browser/pw-session";
 
 export class BrowserManager {
   private browser: Browser | null = null;
@@ -45,6 +45,12 @@ export class BrowserManager {
   public cdpUrl: string = "";
   public targetId: string = "";
 
+  // Messages to be included in the next snapshot (e.g., event notifications)
+  private pendingMessages: string[] = [];
+
+  // Track all pages in the context
+  public pages: Page[] = [];
+
   async init(headless: boolean = false) {
     if (this.browser) return; // Already initialized
 
@@ -57,12 +63,47 @@ export class BrowserManager {
     this.cdpUrl = "http://localhost:9222";
 
     this.context = await this.browser.newContext();
-    this.page = await this.context.newPage();
-
-    this.page.on("request", (request) => {
-      // push basic info
+    
+    // Listen for new pages to automatically track them
+    this.context.on("page", async (newPage) => {
+      console.log(`[Browser] New page opened: ${newPage.url()}`);
+      this.pages.push(newPage);
+      this.pendingMessages.push(`NEW TAB OPENED: ${newPage.url()}. Focus has been automatically switched to this new tab.`);
+      
+      // Auto-switch to new pages if they are opened by user action
+      // We wait for the page to be ready and then update the active page
+      try {
+        await newPage.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
+        this.setActivePage(newPage);
+      } catch (e) {
+        console.warn(`[Browser] Failed to auto-switch to new page: ${e}`);
+      }
+      
+      newPage.on("close", () => {
+        this.pages = this.pages.filter(p => p !== newPage);
+        if (this.page === newPage) {
+          this.pendingMessages.push(`TAB CLOSED: ${newPage.url()}. Current active tab was closed.`);
+          // If active page closed, switch to the last available page
+          const last = this.pages[this.pages.length - 1];
+          if (last) {
+            this.pendingMessages.push(`FOCUS SWITCHED: Focus has been switched to the next available tab: ${last.url()}`);
+            this.setActivePage(last);
+          } else {
+            this.page = null;
+            this.targetId = "";
+          }
+        }
+      });
     });
 
+    this.page = await this.context.newPage();
+    this.setActivePage(this.page);
+  }
+
+  private async setActivePage(page: Page) {
+    this.page = page;
+    
+    // Setup listeners if not already done
     this.page.on("response", (response) => {
       this.networkLogs.push({
         url: response.url(),
@@ -79,25 +120,17 @@ export class BrowserManager {
       });
     });
 
-    // Inject _snapshotForAI required by some OpenClaw aria fallback methods, though we attempt to use the locator version.
-    // The targetId routing normally relies on `server-context` in OpenClaw.
-    // Since we aren't using the server, we will pass true page reference directly where we can,
-    // or rely on the simpler pw tools that we hacked/imported.
-
     // Get the targetId for the page so OpenClaw CDP tools route correctly
-    const session = await this.context.newCDPSession(this.page);
+    const session = await this.page.context().newCDPSession(this.page);
     try {
       const info: any = await session.send("Target.getTargetInfo");
       this.targetId = info?.targetInfo?.targetId || "";
+      console.log(`[Browser] Active page set to: ${this.page.url()} (TargetID: ${this.targetId})`);
     } catch {
       // fallback
     } finally {
-      await session.detach();
+      await session.detach().catch(() => {});
     }
-
-    // NOTE: In a real direct Playwright setup without OpenClaw's background proxy,
-    // `snapshotRoleViaPlaywright` expects `opts.cdpUrl` and `opts.targetId` properly hooked up via `storeRoleRefsForTarget`
-    // We will initialize it.
   }
 
   async close() {
@@ -106,6 +139,8 @@ export class BrowserManager {
       this.browser = null;
       this.context = null;
       this.page = null;
+      this.pages = [];
+      this.targetId = "";
     }
   }
 
@@ -126,9 +161,29 @@ export class BrowserManager {
         options: fullSnapshot ? { raw: true } : (interactiveOnly ? { interactive: true } : undefined),
       });
 
+      // Add tab information to the snapshot
+      let tabInfo = "";
+      if (this.pages.length > 1) {
+        tabInfo = "\n\nAvailable Tabs:\n";
+        for (const p of this.pages) {
+          const title = await p.title().catch(() => "Unknown");
+          const url = p.url();
+          const isActive = p === this.page ? " (ACTIVE)" : "";
+          // We don't easily have targetId here without extra CDP calls, 
+          // but we can provide title and URL for the agent to switch if needed.
+          tabInfo += `- ${title} [${url}]${isActive}\n`;
+        }
+      }
+
+      let notifications = "";
+      if (this.pendingMessages.length > 0) {
+        notifications = "\n\nNOTIFICATIONS:\n" + this.pendingMessages.map(m => `- ${m}`).join("\n");
+        this.pendingMessages = []; // Clear after including in snapshot
+      }
+
       if (!quiet) console.log(`[Browser] Built Snapshot. Stats:`, stats);
       return {
-        text: snapshot,
+        text: snapshot + tabInfo + notifications,
         refs,
         axTree: null, // The snapshot string IS the axTree for aria methods
       };
@@ -381,6 +436,57 @@ export class BrowserManager {
           );
           fs.mkdirSync(path.dirname(dest), { recursive: true });
           fs.writeFileSync(dest, result.buffer);
+        }
+        break;
+
+      case "list_tabs":
+        // This is handled implicitly by the snapshot, but we can log it
+        console.log(`[Browser] Listing ${this.pages.length} tabs`);
+        break;
+
+      case "switch_tab":
+        if (action.targetId) {
+          const target = await findPageByTargetId(this.browser!, action.targetId, this.cdpUrl);
+          if (target) {
+            this.pendingMessages.push(`FOCUS SWITCHED: Focus has been manually switched to tab: ${target.url()}`);
+            await this.setActivePage(target);
+            await target.bringToFront();
+          } else {
+            throw new Error(`Tab with targetId ${action.targetId} not found`);
+          }
+        } else if (action.title || action.url) {
+          const target = this.pages.find(p => 
+            (action.title && p.url().includes(action.title)) || 
+            (action.url && p.url().includes(action.url))
+          );
+          if (target) {
+            this.pendingMessages.push(`FOCUS SWITCHED: Focus has been manually switched to tab: ${target.url()}`);
+            await this.setActivePage(target);
+            await target.bringToFront();
+          } else {
+            throw new Error(`Tab with title/url ${action.title || action.url} not found`);
+          }
+        }
+        break;
+
+      case "close_tab":
+        if (action.targetId) {
+          const target = await findPageByTargetId(this.browser!, action.targetId, this.cdpUrl);
+          if (target) {
+            await target.close();
+          }
+        } else {
+          await this.page.close();
+        }
+        break;
+
+      case "new_tab":
+        if (this.context) {
+          const newPage = await this.context.newPage();
+          if (action.url) {
+            await newPage.goto(action.url);
+          }
+          await this.setActivePage(newPage);
         }
         break;
     }

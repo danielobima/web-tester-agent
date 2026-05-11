@@ -9,6 +9,7 @@ import { google } from "@ai-sdk/google";
 import * as dotenv from "dotenv";
 import * as fs from "fs/promises";
 import { generateMarkdownReport } from "./reporter";
+import { isVisionModel } from "./utils";
 
 dotenv.config();
 
@@ -25,7 +26,9 @@ let goalValidationPromise: { resolve: (val: any) => void; reject: (err: any) => 
 let pausePromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
 let isPaused = false;
 
-const model = google("gemini-3.1-flash-lite-preview");
+const modelName = "gemini-3.1-flash-lite-preview";
+const model = google(modelName);
+const supportsVision = isVisionModel("google", modelName);
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -154,6 +157,7 @@ app.whenReady().then(async () => {
           if (mainWindow) mainWindow.webContents.send("test-issues", issues);
         },
         activeTestController?.signal,
+        supportsVision,
       );
 
       if (mainWindow) {
@@ -245,7 +249,7 @@ app.whenReady().then(async () => {
         if (mainWindow) mainWindow.webContents.send("test-checklist", checklist);
       }, (isPlanning: boolean) => {
         if (mainWindow) mainWindow.webContents.send("test-planning-state", isPlanning);
-      }, activeTestController.signal);
+      }, activeTestController.signal, supportsVision);
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
         mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration });

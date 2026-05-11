@@ -32,6 +32,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { z } from "zod";
 import { evaluateAssertions } from "./replay";
+import { saveAgentErrorReport } from "./error_logger";
 
 export type PlanApprovalResult =
   | { action: "accept" }
@@ -123,6 +124,7 @@ export async function runAgent(
   screenshotsDir?: string,
   onIssuesUpdate?: (issues: any[]) => void,
   signal?: AbortSignal,
+  supportsVision?: boolean,
 ) {
   const history: AgentHistoryMessage[] = [];
   let stepCounter = 1;
@@ -228,7 +230,7 @@ export async function runAgent(
                   type: "text" as const,
                   text: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`,
                 },
-                ...(screenshot
+                ...(screenshot && supportsVision !== false
                   ? [{ type: "image" as const, image: screenshot }]
                   : []),
               ],
@@ -278,6 +280,22 @@ export async function runAgent(
       } catch (e: any) {
         if (onPlanning) onPlanning(false);
         console.error(`[Agent][Planner] Planning failed: ${e.message}`);
+        
+        if (artifactsDir) {
+          await saveAgentErrorReport(artifactsDir, {
+            error: e,
+            type: "planning",
+            step: stepCounter,
+            requirement,
+            url: currentUrl,
+            history: [...history],
+            snapshot,
+            axTree,
+            refs,
+            checklist,
+            llmPrompt: planningPrompt
+          }, browser);
+        }
       }
 
       if (checklist.isGoalAchieved) {
@@ -390,7 +408,7 @@ export async function runAgent(
                     type: "text" as const,
                     text: `Goal: ${requirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`,
                   },
-                  ...(screenshot
+                  ...(screenshot && supportsVision !== false
                     ? [{ type: "image" as const, image: screenshot }]
                     : []),
                 ],
@@ -439,7 +457,27 @@ export async function runAgent(
             ],
           });
 
-          if (retries >= maxRetries) throw new Error(errorMessage);
+          if (retries >= maxRetries) {
+            if (artifactsDir) {
+              await saveAgentErrorReport(artifactsDir, {
+                error: e,
+                type: "execution",
+                step: stepCounter,
+                requirement,
+                url: currentUrl,
+                taskId: currentTaskId,
+                taskDescription: currentTask.description,
+                history: [...history],
+                snapshot,
+                axTree,
+                refs,
+                checklist,
+                llmPrompt: executionPrompt,
+                llmRawResponse: e.text
+              }, browser);
+            }
+            throw new Error(errorMessage);
+          }
         }
       }
 
@@ -472,13 +510,13 @@ export async function runAgent(
         try {
           await browser.execute(action);
 
-          if (onStep) {
-            if (serializer && executionResponse.previousActionResult) {
-              serializer.updatePreviousResult(
-                executionResponse.previousActionResult,
-              );
-            }
+          if (serializer && executionResponse.previousActionResult) {
+            serializer.updatePreviousResult(
+              executionResponse.previousActionResult,
+            );
+          }
 
+          if (onStep) {
             onStep({
               id: `exec-${stepCounter}`,
               step: `Executing: ${action.kind}`,
@@ -491,32 +529,49 @@ export async function runAgent(
               issues: executionResponse.issues,
               url: browser.page?.url() || "",
             });
+          }
 
-            history.push({
-              role: "assistant",
-              content: [
-                {
-                  type: "text",
-                  text: `Observation: ${executionResponse.currentStateDescription}\nAction: ${executionResponse.intendedActionDescription}${executionResponse.issues && executionResponse.issues.length > 0 ? `\nIssues: ${executionResponse.issues.join(", ")}` : ""}`,
-                },
-              ],
+          history.push({
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: `Observation: ${executionResponse.currentStateDescription}\nAction: ${executionResponse.intendedActionDescription}${executionResponse.issues && executionResponse.issues.length > 0 ? `\nIssues: ${executionResponse.issues.join(", ")}` : ""}`,
+              },
+            ],
+          });
+
+          if (serializer) {
+            serializer.logAction(action, {
+              stateDescription: executionResponse.currentStateDescription,
+              actionIntent: executionResponse.intendedActionDescription,
+              taskId: currentTaskId,
+              stateSnapshot: screenshotPath,
+              issues: executionResponse.issues,
             });
-
-            if (serializer) {
-              serializer.logAction(action, {
-                stateDescription: executionResponse.currentStateDescription,
-                actionIntent: executionResponse.intendedActionDescription,
-                taskId: currentTaskId,
-                stateSnapshot: screenshotPath,
-                issues: executionResponse.issues,
-              });
-              if (onIssuesUpdate)
-                onIssuesUpdate(serializer.getTest()?.issues || []);
-              await serializer.saveTest();
-            }
+            if (onIssuesUpdate)
+              onIssuesUpdate(serializer.getTest()?.issues || []);
+            await serializer.saveTest();
           }
         } catch (e: any) {
           console.error(`[Agent] Action failed: ${e.message}`);
+
+          if (artifactsDir) {
+            await saveAgentErrorReport(artifactsDir, {
+              error: e,
+              type: "browser",
+              step: stepCounter,
+              requirement,
+              url: browser.page?.url() || currentUrl,
+              taskId: currentTaskId,
+              taskDescription: currentTask.description,
+              history: [...history],
+              snapshot,
+              axTree,
+              refs,
+              checklist,
+            }, browser);
+          }
 
           let errorScreenshotPath = "";
           if (screenshot && screenshotsDir) {
@@ -587,7 +642,7 @@ export async function runAgent(
                       type: "text" as const,
                       text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`,
                     },
-                    ...(currentTaskBeforeScreenshot
+                    ...(currentTaskBeforeScreenshot && supportsVision !== false
                       ? [
                           {
                             type: "image" as const,
@@ -595,7 +650,7 @@ export async function runAgent(
                           },
                         ]
                       : []),
-                    ...(afterActionScreenshot
+                    ...(afterActionScreenshot && supportsVision !== false
                       ? [
                           {
                             type: "image" as const,
@@ -649,6 +704,25 @@ export async function runAgent(
             break;
           } catch (e: any) {
             assertionRetries++;
+            
+            if (assertionRetries >= 3 && artifactsDir) {
+              await saveAgentErrorReport(artifactsDir, {
+                error: e,
+                type: "verification",
+                step: stepCounter,
+                requirement,
+                url: browser.page?.url() || currentUrl,
+                taskId: currentTaskId,
+                taskDescription: currentTask.description,
+                history: [...history],
+                snapshot: afterSnapshot,
+                refs: afterRefs,
+                checklist,
+                llmPrompt: assertionPromptTemplate,
+                llmRawResponse: e.text
+              }, browser);
+            }
+
             assertionHistory.push({
               role: "user",
               content: [

@@ -9,6 +9,7 @@ import { google } from "@ai-sdk/google";
 import { createOllama } from "ollama-ai-provider-v2";
 import * as readline from "readline/promises";
 import { type Checklist } from "./actions";
+import { isVisionModel } from "./utils";
 
 dotenv.config();
 
@@ -41,6 +42,9 @@ async function main() {
       if (!modelName) modelName = "gemini-3.1-flash-lite-preview";
       model = google(modelName);
     }
+    
+    const supportsVision = isVisionModel(provider, modelName);
+    console.log(`[CLI] Model: ${modelName} (Vision support: ${supportsVision})`);
 
     if (command === "record") {
       const saveArtifacts = !args.includes("--no-artifacts");
@@ -112,14 +116,20 @@ async function main() {
           }
           rl.close();
           return { action: 'validate' };
-        } : undefined
+        } : undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        supportsVision,
       );
 
       await serializer.saveTest(finalOutPath);
     } else if (command === "replay") {
       const file = args.find(a => !a.startsWith("-") && a !== "replay");
       if (!file) throw new Error("Missing file path for replay.");
-      await replayTest(file, browser, model as any, undefined, false, false);
+      await replayTest(file, browser, model as any, undefined, false, false, undefined, undefined, undefined, undefined, supportsVision);
     }
   } catch (e: any) {
     console.error(`[CLI] Error: ${e.message}`);

@@ -12,6 +12,8 @@ You have access to:
 4. Console logs captured during the task execution.
 5. BEFORE and AFTER visual screenshots of the page.
 
+Note: If you see "NOTIFICATIONS" in the snapshots, it indicates a browser event occurred, such as a new tab opening.
+
 Your job is to:
 1. Analyze the state transition (textual, visual, and network).
 2. Check technical health (Console/Network) for regressions during the task.
