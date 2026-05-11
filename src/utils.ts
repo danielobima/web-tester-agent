@@ -4,12 +4,12 @@
  */
 export function isVisionModel(provider: string, modelName: string): boolean {
   const name = modelName.toLowerCase();
-  
+
   // Google Gemini models usually support vision
   if (provider === "google") {
     return name.includes("gemini");
   }
-  
+
   // OpenAI models
   if (provider === "openai") {
     return name.includes("gpt-4") || name.includes("o1") || name.includes("o3");
@@ -22,8 +22,15 @@ export function isVisionModel(provider: string, modelName: string): boolean {
 
   // Ollama vision models usually have specific keywords
   if (provider === "ollama") {
-    const visionKeywords = ["vision", "llava", "moondream", "minicpm-v", "bakllava", "qwen2-vl"];
-    return visionKeywords.some(keyword => name.includes(keyword));
+    const visionKeywords = [
+      "vision",
+      "llava",
+      "moondream",
+      "minicpm-v",
+      "bakllava",
+      "qwen2-vl",
+    ];
+    return visionKeywords.some((keyword) => name.includes(keyword));
   }
 
   // Default to false for unknown models/providers to be safe

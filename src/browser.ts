@@ -181,9 +181,98 @@ export class BrowserManager {
         this.pendingMessages = []; // Clear after including in snapshot
       }
 
-      if (!quiet) console.log(`[Browser] Built Snapshot. Stats:`, stats);
+      let focusedRef: string | null = null;
+      const activeInfo = await this.page.evaluate(() => {
+        const getDeepActiveElement = (doc: Document): Element | null => {
+          let el = doc.activeElement;
+          if (!el) return null;
+          while (el && el.shadowRoot && el.shadowRoot.activeElement) {
+            el = el.shadowRoot.activeElement;
+          }
+          if (el && el.tagName === "IFRAME") {
+            try {
+              const contentDoc = (el as HTMLIFrameElement).contentDocument;
+              if (contentDoc) {
+                const deep = getDeepActiveElement(contentDoc);
+                return deep || el;
+              }
+            } catch (e) {
+              return el; // Cross-origin
+            }
+          }
+          return el;
+        };
+        const el = getDeepActiveElement(document);
+        if (!el || el === document.body || el === document.documentElement) return null;
+        return { tagName: el.tagName, id: el.id, className: el.className };
+      }).catch(() => null);
+
+      if (activeInfo) {
+        // Find the specific frame that contains the active element
+        const frames = this.page.frames();
+        let targetFrame = null;
+        for (const frame of frames) {
+          const isFrameFocused = await frame.evaluate(() => {
+            const el = document.activeElement;
+            return el && el !== document.body && el !== document.documentElement;
+          }).catch(() => false);
+          if (isFrameFocused) {
+            targetFrame = frame;
+            break;
+          }
+        }
+
+        if (targetFrame) {
+          for (const ref of Object.keys(refs)) {
+            try {
+              const info = refs[ref];
+              const loc = targetFrame.getByRole(info.role as any, { name: info.name, exact: true });
+              const count = await loc.count().catch(() => 0);
+              
+              if (count > 0) {
+                const targetLoc = info.nth !== undefined ? loc.nth(info.nth) : loc;
+                const isFocused = await targetLoc.evaluate((node) => {
+                  let active = document.activeElement;
+                  while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+                    active = active.shadowRoot.activeElement;
+                  }
+                  return node === active;
+                }).catch(() => false);
+
+                if (isFocused) {
+                  focusedRef = ref;
+                  break;
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
+      }
+
+      let processedSnapshot = snapshot;
+      if (focusedRef) {
+        const lines = processedSnapshot.split("\n");
+        processedSnapshot = lines.map(line => {
+          if (line.includes(`[ref=${focusedRef}]`)) {
+            return line + " (FOCUSED)";
+          }
+          return line;
+        }).join("\n");
+      }
+
+      if (!quiet) {
+        if (focusedRef) {
+          console.log(`[Browser] Built Snapshot. Focused element found: ${focusedRef}`);
+        } else if (activeInfo) {
+          console.log(`[Browser] Built Snapshot. Active element exists (${(activeInfo as any).tagName}) but no matching ref found in ${Object.keys(refs).length} refs.`);
+        } else {
+          console.log(`[Browser] Built Snapshot. No active element found.`);
+        }
+      }
       return {
-        text: snapshot + tabInfo + notifications,
+        text: processedSnapshot + tabInfo + notifications,
         refs,
         axTree: null, // The snapshot string IS the axTree for aria methods
       };

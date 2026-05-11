@@ -1,0 +1,70 @@
+✔ Test serialization @done(26-03-18 12:11)
+✔ store role/name pairs @done(26-03-18 12:11)
+✔ handle duplicate role/name pairs @done(26-03-18 12:11)
+✔ Test assertions - For this we assert tasks not each individual step @done(26-03-23 17:12)
+✔ Visual Agent @done(26-03-19 16:34)
+✔ LLM loop detection and prevention @done(26-03-19 15:20)
+✔ Electron UI @done(26-03-30 15:57)
+✔ Human in the loop feedback incorporation @done(26-04-22 09:47)
+    ✔ Show screenshots in the execution stream @done(26-04-09 11:54)
+    ✔ The verify steps show the screenshot of the previous state - FIXED @done(26-04-09 12:26)
+    ✔ A full screen carousel to view the execution stream. @done(26-04-09 12:26)
+    ✔ approve plans @done(26-04-09 11:55)
+    ✔ The carousel should show the previous state description and the action taken and the logic behind the action taken @done(26-04-09 12:59)
+    ✔ Validate completion of the scenario @done(26-04-10 16:40)
+    ✔ The goal validation dialog should also display a screenshot of the state that is being validated @done(26-04-10 16:40)
+    ✔ Pause execution and reprompt or modify plan @done(26-04-10 16:51)
+    ✔ Fix "tab not found" error @done(26-04-10 16:51)
+    ✔ Generation of markdown testing report for the suite generation @done(26-04-14 12:03)
+✔ Debug fill action @done(26-04-22 10:20)
+✔ Modify the prompts to tell the agent to search for issues and be strict about the user journey @done(26-04-22 11:09)
+✔ The goal validation dialog should just be one tab, first the plan, then conclusion, then the issues, then the usability, then the prompt further box. @done(26-04-22 11:58)
+✔ The first test run does not show the goalvalidation dialog @done(26-04-22 11:58)
+☐ Understand agent.ts logic
+✔ show the report in the execution stream page @done(26-04-27 12:44)
+✔ Show the issues in the execution stream page @done(26-04-27 15:52)
+✔ Combine the approve and submit feedback buttons into one, change the state depending on feedback presense @done(26-04-27 15:54)
+✔ Remove usability array and just have issues array and the agent to assign severity to each issue @done(26-04-27 16:47)
+✔ We are getting duplicate issues @done(26-05-04 11:26)
+☐ Systematic formal way of testing: a testing framework can take a subset of the dataset
+    ✔ I should be able to dispatch the test directly from the website @done(26-05-05 12:33)
+    ☐ I should be able to see test logs and results in the website
+✔ Should be able to actually catch bugs, demo a test where there is a known defect @done(26-05-04 11:27)
+☐ A systematic way to store agent errors, (No object generated, failed action execution etc)
+☐ Fix tab not found error when an existing chrome window is open - Also unable to know which tab is active
+☐ Implement a wait command
+☐ Add autocomplete for website urls
+☐ Fix execution retry not working
+✔ In smaller screens the model card overlaps the execution stream @done(26-04-14 15:36)
+✔ Should not show "successfully finished execution" text in the UI until after the user has approved @done(26-05-04 11:17)
+☐ Enable running on headless mode
+☐ CLI optimization
+☐ Scroll interaction
+✔ Markdown report generation with findings @done(26-04-14 12:03)
+☐ Create an application to group tests into suites
+☐ Enable export markdown to pdf
+☐ Generation of markdown testing report for replay. User should be able to choose whether they want report for success, failed or both. 
+☐ Device emulation
+☐ Uploading of PRD/requirements to be broken down into goals
+☐ Backend database
+☐ Backtracking
+-what if we could generate a graph of possible interactions and build it at each interaction,
+such that we can see all the possible paths we can take and the probability of each path leading to the goal.
+☐ Test optimization
+☐ Cookie and local storage injection
+☐ Mock APIs
+☐ Test creation from requirements spec
+☐ Browser console logs extraction
+☐ Bulk form filling
+☐ exploratoty testing
+☐ Test healing 
+☐ Desktop app
+☐ Task Queue
+☐ Test pipeline
+☐ Vector db integration for analysis
+☐ Human in the loop
+☐ Report Generation
+☐ Artifact storage
+☐ APS - Agent Performance Score
+☐ Failure analysis categorization (Perception, Reasoning, Execution etc)
+☐ SOTA visual regression testing

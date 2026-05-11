@@ -237,6 +237,8 @@ export async function runAgent(
             },
           ],
         });
+
+        console.log("[Agent][Planner] Planning result:", planningResult.object);
         checklist = planningResult.object;
         if (onChecklist) onChecklist(checklist);
         if (serializer) serializer.updateChecklist(checklist);
@@ -254,11 +256,21 @@ export async function runAgent(
           needsPlanApproval = false;
         }
 
-        // Safety: If no next task is found but the goal isn't marked as achieved, 
+        // Safety: If no next task is found but the goal isn't marked as achieved,
         // check if all existing tasks are finished. If so, treat it as goal completion.
-        const allTasksFinished = checklist.tasks.length > 0 && checklist.tasks.every(t => t.status === "completed" || t.status === "failed");
-        if (!checklist.nextTaskId && !checklist.isGoalAchieved && allTasksFinished) {
-          console.log("[Agent] Implicit goal achievement detected (all tasks finished).");
+        const allTasksFinished =
+          checklist.tasks.length > 0 &&
+          checklist.tasks.every(
+            (t) => t.status === "completed" || t.status === "failed",
+          );
+        if (
+          !checklist.nextTaskId &&
+          !checklist.isGoalAchieved &&
+          allTasksFinished
+        ) {
+          console.log(
+            "[Agent] Implicit goal achievement detected (all tasks finished).",
+          );
           checklist.isGoalAchieved = true;
         }
 
@@ -275,26 +287,32 @@ export async function runAgent(
           if (history.length > 20) history.splice(0, 2);
         }
         if (checklist.isGoalAchieved) {
-          console.log(`[Agent] Planner indicates goal achieved: ${checklist.currentStateDescription}`);
+          console.log(
+            `[Agent] Planner indicates goal achieved: ${checklist.currentStateDescription}`,
+          );
         }
       } catch (e: any) {
         if (onPlanning) onPlanning(false);
         console.error(`[Agent][Planner] Planning failed: ${e.message}`);
-        
+
         if (artifactsDir) {
-          await saveAgentErrorReport(artifactsDir, {
-            error: e,
-            type: "planning",
-            step: stepCounter,
-            requirement,
-            url: currentUrl,
-            history: [...history],
-            snapshot,
-            axTree,
-            refs,
-            checklist,
-            llmPrompt: planningPrompt
-          }, browser);
+          await saveAgentErrorReport(
+            artifactsDir,
+            {
+              error: e,
+              type: "planning",
+              step: stepCounter,
+              requirement,
+              url: currentUrl,
+              history: [...history],
+              snapshot,
+              axTree,
+              refs,
+              checklist,
+              llmPrompt: planningPrompt,
+            },
+            browser,
+          );
         }
       }
 
@@ -329,7 +347,21 @@ export async function runAgent(
           break;
         }
       }
-      const currentTaskId = checklist.nextTaskId;
+      let currentTaskId = checklist.nextTaskId;
+
+      // Fallback: If the model didn't provide nextTaskId, pick the first pending task
+      if (!currentTaskId) {
+        const firstPending = checklist.tasks.find(
+          (t) => t.status === "pending" || t.status === "in_progress",
+        );
+        if (firstPending) {
+          console.log(
+            `[Agent] Fallback: No nextTaskId provided, picking first pending task: ${firstPending.id}`,
+          );
+          currentTaskId = firstPending.id;
+        }
+      }
+
       const currentTask = checklist.tasks.find((t) => t.id === currentTaskId);
 
       if (onStep && currentTask) {
@@ -392,8 +424,13 @@ export async function runAgent(
 
       while (retries < maxRetries) {
         try {
-          const currentIssues = serializer?.getTest()?.issues || checklist.issues || [];
-          const issuesSummary = currentIssues.map(i => `${i.id}: ${i.description}`).join("; ");
+          const currentIssues =
+            serializer?.getTest()?.issues || checklist.issues || [];
+          const issuesSummary = currentIssues
+            .map((i) => `${i.id}: ${i.description}`)
+            .join("; ");
+
+          console.log("[Agent][Executor] Beginning execution prompt");
 
           const result = await generateObject({
             model,
@@ -459,22 +496,26 @@ export async function runAgent(
 
           if (retries >= maxRetries) {
             if (artifactsDir) {
-              await saveAgentErrorReport(artifactsDir, {
-                error: e,
-                type: "execution",
-                step: stepCounter,
-                requirement,
-                url: currentUrl,
-                taskId: currentTaskId,
-                taskDescription: currentTask.description,
-                history: [...history],
-                snapshot,
-                axTree,
-                refs,
-                checklist,
-                llmPrompt: executionPrompt,
-                llmRawResponse: e.text
-              }, browser);
+              await saveAgentErrorReport(
+                artifactsDir,
+                {
+                  error: e,
+                  type: "execution",
+                  step: stepCounter,
+                  requirement,
+                  url: currentUrl,
+                  taskId: currentTaskId,
+                  taskDescription: currentTask.description,
+                  history: [...history],
+                  snapshot,
+                  axTree,
+                  refs,
+                  checklist,
+                  llmPrompt: executionPrompt,
+                  llmRawResponse: e.text,
+                },
+                browser,
+              );
             }
             throw new Error(errorMessage);
           }
@@ -557,20 +598,24 @@ export async function runAgent(
           console.error(`[Agent] Action failed: ${e.message}`);
 
           if (artifactsDir) {
-            await saveAgentErrorReport(artifactsDir, {
-              error: e,
-              type: "browser",
-              step: stepCounter,
-              requirement,
-              url: browser.page?.url() || currentUrl,
-              taskId: currentTaskId,
-              taskDescription: currentTask.description,
-              history: [...history],
-              snapshot,
-              axTree,
-              refs,
-              checklist,
-            }, browser);
+            await saveAgentErrorReport(
+              artifactsDir,
+              {
+                error: e,
+                type: "browser",
+                step: stepCounter,
+                requirement,
+                url: browser.page?.url() || currentUrl,
+                taskId: currentTaskId,
+                taskDescription: currentTask.description,
+                history: [...history],
+                snapshot,
+                axTree,
+                refs,
+                checklist,
+              },
+              browser,
+            );
           }
 
           let errorScreenshotPath = "";
@@ -627,8 +672,11 @@ export async function runAgent(
 
         while (assertionRetries < 3) {
           try {
-            const currentIssues = serializer?.getTest()?.issues || checklist.issues || [];
-            const issuesSummary = currentIssues.map(i => `${i.id}: ${i.description}`).join("; ");
+            const currentIssues =
+              serializer?.getTest()?.issues || checklist.issues || [];
+            const issuesSummary = currentIssues
+              .map((i) => `${i.id}: ${i.description}`)
+              .join("; ");
 
             const assertionResult = await generateObject({
               model,
@@ -704,23 +752,27 @@ export async function runAgent(
             break;
           } catch (e: any) {
             assertionRetries++;
-            
+
             if (assertionRetries >= 3 && artifactsDir) {
-              await saveAgentErrorReport(artifactsDir, {
-                error: e,
-                type: "verification",
-                step: stepCounter,
-                requirement,
-                url: browser.page?.url() || currentUrl,
-                taskId: currentTaskId,
-                taskDescription: currentTask.description,
-                history: [...history],
-                snapshot: afterSnapshot,
-                refs: afterRefs,
-                checklist,
-                llmPrompt: assertionPromptTemplate,
-                llmRawResponse: e.text
-              }, browser);
+              await saveAgentErrorReport(
+                artifactsDir,
+                {
+                  error: e,
+                  type: "verification",
+                  step: stepCounter,
+                  requirement,
+                  url: browser.page?.url() || currentUrl,
+                  taskId: currentTaskId,
+                  taskDescription: currentTask.description,
+                  history: [...history],
+                  snapshot: afterSnapshot,
+                  refs: afterRefs,
+                  checklist,
+                  llmPrompt: assertionPromptTemplate,
+                  llmRawResponse: e.text,
+                },
+                browser,
+              );
             }
 
             assertionHistory.push({
