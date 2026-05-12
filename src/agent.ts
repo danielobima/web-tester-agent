@@ -223,27 +223,55 @@ export async function runAgent(
       console.log(`[Agent][Planner] Planning...`);
       const planningStartTime = Date.now();
       if (onPlanning) onPlanning(true);
-      try {
-        const planningResult = await generateObject({
-          model,
-          schema: ChecklistSchema,
-          system: planningPrompt,
-          messages: [
-            ...history,
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`,
-                },
-                ...(screenshot && supportsVision !== false
-                  ? [{ type: "image" as const, image: screenshot }]
-                  : []),
-              ],
-            },
-          ],
-        });
+        let planningResult;
+        try {
+          planningResult = await generateObject({
+            model,
+            schema: ChecklistSchema,
+            system: planningPrompt,
+            messages: [
+              ...history,
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text" as const,
+                    text: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`,
+                  },
+                  ...(screenshot && supportsVision !== false
+                    ? [{ type: "image" as const, image: screenshot }]
+                    : []),
+                ],
+              },
+            ],
+          });
+        } catch (e: any) {
+          if (onPlanning) onPlanning(false);
+          const rawResponse = e.text || (e.cause?.text) || (e.response?.text);
+          console.log(`[Agent][Planner] Raw response:`, rawResponse);
+
+          if (artifactsDir) {
+            await saveAgentErrorReport(
+              artifactsDir,
+              {
+                error: e,
+                type: "planning",
+                step: stepCounter,
+                requirement,
+                url: currentUrl,
+                history: [...history],
+                snapshot,
+                axTree,
+                refs,
+                checklist,
+                llmPrompt: planningPrompt,
+                llmRawResponse: rawResponse,
+              },
+              browser,
+            );
+          }
+          throw e;
+        }
 
         console.log("[Agent][Planner] Planning result:", planningResult.object);
         checklist = planningResult.object;
@@ -479,9 +507,8 @@ export async function runAgent(
             errorMessage = `Schema validation failed:\n${details}`;
           }
 
-          console.warn(
-            `[Agent][Executor] Execution schema validation failed (Attempt ${retries}/${maxRetries}): ${errorMessage}\nfull error: ${JSON.stringify(e)}`,
-          );
+          const rawResponse = e.text || (e.cause?.text) || (e.response?.text);
+          console.log(`[Agent][Executor] Raw response:`, rawResponse);
           history.push({
             role: "assistant",
             content: [
@@ -759,6 +786,8 @@ export async function runAgent(
             break;
           } catch (e: any) {
             assertionRetries++;
+            const rawResponse = e.text || (e.cause?.text) || (e.response?.text);
+            console.log(`[Agent][Asserter] Raw response:`, rawResponse);
 
             if (assertionRetries >= 3 && artifactsDir) {
               await saveAgentErrorReport(

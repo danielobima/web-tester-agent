@@ -268,6 +268,20 @@ export const AgentErrors = () => {
                       </pre>
                    </div>
                  </details>
+
+                 {selectedError.llm.rawResponse && (
+                   <details className="group border border-on-surface/5 rounded-xl bg-surface-low overflow-hidden mt-4">
+                     <summary className="p-4 cursor-pointer hover:bg-on-surface/5 flex items-center justify-between font-bold text-xs uppercase tracking-widest list-none">
+                       <span className="text-primary">Raw AI Output (Debug)</span>
+                       <Icons.ChevronRight className="group-open:rotate-90 transition-transform" />
+                     </summary>
+                     <div className="p-4 border-t border-on-surface/5 bg-surface-lowest">
+                        <pre className="text-[10px] font-mono whitespace-pre-wrap text-primary/80 overflow-x-auto max-h-[400px]">
+                          {selectedError.llm.rawResponse}
+                        </pre>
+                     </div>
+                   </details>
+                 )}
               </div>
             </section>
 
