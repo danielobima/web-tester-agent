@@ -34,6 +34,7 @@ export interface AppConfig {
   defaultModelId?: string;
   requirePlanApproval?: boolean;
   headless?: boolean;
+  enableVision?: boolean;
 }
 
 const dataDir = path.join(app.getPath("userData"), "data");
@@ -102,7 +103,8 @@ export async function getConfig(): Promise<AppConfig> {
       ],
       defaultModelId: "gemini-1.5-flash",
       requirePlanApproval: true,
-      headless: false
+      headless: false,
+      enableVision: false
     };
   }
 }

@@ -61,6 +61,15 @@ export function normalizeTimeoutMs(
 export function toAIFriendlyError(error: unknown, selector: string): Error {
   const message = error instanceof Error ? error.message : String(error);
 
+  console.log(`[PW-TOOLS] toAIFriendlyError: ${message}`);
+  
+  if (message.includes("Malformed value")) {
+    return new Error(
+      `The value provided to "${selector}" is in an invalid format for this input type. ` +
+      `Note: <input type="date"> requires "YYYY-MM-DD" format.`,
+    );
+  }
+
   if (message.includes("strict mode violation")) {
     const countMatch = message.match(/resolved to (\d+) elements/);
     const count = countMatch ? countMatch[1] : "multiple";
@@ -72,11 +81,21 @@ export function toAIFriendlyError(error: unknown, selector: string): Error {
 
   if (
     (message.includes("Timeout") || message.includes("waiting for")) &&
-    (message.includes("to be visible") || message.includes("not visible"))
+    message.includes("to be visible")
   ) {
     return new Error(
-      `Element "${selector}" not found or not visible. ` +
-        `Run a new snapshot to see current page elements.`,
+      `Element "${selector}" was not found or never became visible. ` +
+        `Check if you are on the right page or if the element is hidden.`,
+    );
+  }
+
+  if (
+    (message.includes("Timeout") || message.includes("waiting for")) &&
+    (message.includes("to be hidden") || message.includes("not visible"))
+  ) {
+    return new Error(
+      `Timeout waiting for element "${selector}" to disappear. ` +
+        `A loading state or overlay might be stuck.`,
     );
   }
 

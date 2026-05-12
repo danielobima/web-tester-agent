@@ -201,6 +201,19 @@ export const Settings = () => {
                   <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${config.headless ? 'left-7' : 'left-1'}`} />
                 </button>
               </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-on-surface">Enable Vision</h3>
+                  <p className="text-sm text-on-surface/40">Pass screenshots to AI models (supports Gemini/GPT-4o/Ollama Vision)</p>
+                </div>
+                <button 
+                  onClick={() => handleSave({...config, enableVision: !config.enableVision})}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${config.enableVision ? 'bg-primary' : 'bg-on-surface/10'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${config.enableVision ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
             </div>
           </section>
 

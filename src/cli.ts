@@ -19,8 +19,8 @@ async function main() {
 
   if (!command) {
     console.log(`Usage: 
-    npm run dev -- record "<Goal>" "<StartUrl>" "<OutputFile.json>" [--no-artifacts] [--full-snapshot] [--interactive] [--no-vision]
-    npm run dev -- replay "<File.json>" [--no-artifacts] [--full-snapshot] [--no-vision]`);
+    npm run dev -- record "<Goal>" "<StartUrl>" "<OutputFile.json>" [--no-artifacts] [--full-snapshot] [--interactive] [--vision]
+    npm run dev -- replay "<File.json>" [--no-artifacts] [--full-snapshot] [--vision]`);
     process.exit(1);
   }
 
@@ -43,9 +43,9 @@ async function main() {
       model = google(modelName);
     }
     
-    const noVision = args.includes("--no-vision");
-    const supportsVision = noVision ? false : isVisionModel(provider, modelName);
-    console.log(`[CLI] Model: ${modelName} (Vision support: ${supportsVision}${noVision ? ' [FORCED OFF]' : ''})`);
+    const useVision = args.includes("--vision");
+    const supportsVision = useVision && isVisionModel(provider, modelName);
+    console.log(`[CLI] Model: ${modelName} (Vision support: ${supportsVision}${useVision ? "" : " [DISABLED BY DEFAULT]"})`);
 
     if (command === "record") {
       const saveArtifacts = !args.includes("--no-artifacts");
@@ -53,7 +53,7 @@ async function main() {
       const fullSnapshot = args.includes("--full-snapshot");
       const isInteractive = args.includes("--interactive") || args.includes("-i");
       
-      const cleanArgs = args.filter(a => !["--no-artifacts", "--skip-assertions", "--full-snapshot", "--interactive", "-i", "--no-vision"].includes(a) && !a.startsWith("--provider=") && !a.startsWith("--model="));
+      const cleanArgs = args.filter(a => !["--no-artifacts", "--skip-assertions", "--full-snapshot", "--interactive", "-i", "--vision"].includes(a) && !a.startsWith("--provider=") && !a.startsWith("--model="));
 
       const goal = cleanArgs[1];
       const startUrl = cleanArgs[2];

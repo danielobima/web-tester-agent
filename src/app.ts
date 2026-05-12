@@ -110,7 +110,7 @@ app.whenReady().then(async () => {
     const config = await data.getConfig();
     const modelConfig = config.models.find(m => m.id === model) || config.models[0];
     const aiModel = createModel(modelConfig);
-    const modelSupportsVision = isVisionModel(modelConfig.provider, modelConfig.modelName);
+    const modelSupportsVision = config.enableVision && isVisionModel(modelConfig.provider, modelConfig.modelName);
 
     serializer.startTest(prompt, url);
     serializer.setOutPath(suitePath);
@@ -266,7 +266,7 @@ app.whenReady().then(async () => {
     const config = await data.getConfig();
     const modelConfig = config.models.find(m => m.id === config.defaultModelId) || config.models[0];
     const aiModel = createModel(modelConfig);
-    const modelSupportsVision = isVisionModel(modelConfig.provider, modelConfig.modelName);
+    const modelSupportsVision = config.enableVision && isVisionModel(modelConfig.provider, modelConfig.modelName);
 
     try {
       await browser.init(config.headless || false);
