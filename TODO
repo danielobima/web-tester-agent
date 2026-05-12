@@ -42,6 +42,7 @@
 ☐ Enable running on headless mode - needs testing
 ☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
 ☐ Scroll interaction - Only relevant for vision models - needs testing
+☐ Implement retry for the planning agent
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
 ☐ Enable export markdown to pdf

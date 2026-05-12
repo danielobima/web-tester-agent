@@ -388,17 +388,22 @@ async function getAllPages(browser: Browser): Promise<Page[]> {
 }
 
 async function pageTargetId(page: Page): Promise<string | null> {
-  const session = await page.context().newCDPSession(page);
   try {
-    const info = (await session.send(
-      "Target.getTargetInfo",
-    )) as TargetInfoResponse;
-    const targetId = String(info?.targetInfo?.targetId ?? "").trim();
-    return targetId || null;
-  } finally {
-    await session.detach().catch(() => {});
+    const session = await page.context().newCDPSession(page);
+    try {
+      const info = (await session.send(
+        "Target.getTargetInfo",
+      )) as TargetInfoResponse;
+      const targetId = String(info?.targetInfo?.targetId ?? "").trim();
+      return targetId || null;
+    } finally {
+      await session.detach().catch(() => {});
+    }
+  } catch {
+    return null;
   }
 }
+
 
 export async function findPageByTargetId(
   browser: Browser,

@@ -101,37 +101,57 @@ export class BrowserManager {
   }
 
   private async setActivePage(page: Page) {
+    if (page.isClosed()) {
+      console.warn("[Browser] Attempted to set a closed page as active.");
+      return;
+    }
     this.page = page;
-    
-    // Setup listeners if not already done
-    this.page.on("response", (response) => {
-      this.networkLogs.push({
-        url: response.url(),
-        method: response.request().method(),
-        status: response.status(),
-      });
-    });
 
-    this.page.on("console", (message) => {
-      this.consoleLogs.push({
-        type: message.type(),
-        text: message.text(),
-        location: `${message.location().url}:${message.location().lineNumber}`,
+    // Setup listeners if not already done
+    const pageObj = page as any;
+    if (!pageObj._listenersAttached) {
+      pageObj._listenersAttached = true;
+      page.on("response", (response) => {
+        this.networkLogs.push({
+          url: response.url(),
+          method: response.request().method(),
+          status: response.status(),
+        });
       });
-    });
+
+      page.on("console", (message) => {
+        this.consoleLogs.push({
+          type: message.type(),
+          text: message.text(),
+          location: `${message.location().url}:${message.location().lineNumber}`,
+        });
+      });
+
+      page.on("close", () => {
+        pageObj._listenersAttached = false;
+      });
+    }
 
     // Get the targetId for the page so OpenClaw CDP tools route correctly
-    const session = await this.page.context().newCDPSession(this.page);
     try {
-      const info: any = await session.send("Target.getTargetInfo");
-      this.targetId = info?.targetInfo?.targetId || "";
-      console.log(`[Browser] Active page set to: ${this.page.url()} (TargetID: ${this.targetId})`);
-    } catch {
-      // fallback
-    } finally {
-      await session.detach().catch(() => {});
+      const session = await page.context().newCDPSession(page);
+      try {
+        const info: any = await session.send("Target.getTargetInfo");
+        this.targetId = info?.targetInfo?.targetId || "";
+        console.log(
+          `[Browser] Active page set to: ${page.url()} (TargetID: ${this.targetId})`,
+        );
+      } catch (e) {
+        console.warn(`[Browser] Failed to get target info: ${e}`);
+      } finally {
+        await session.detach().catch(() => {});
+      }
+    } catch (e) {
+      console.warn(`[Browser] Failed to create CDP session: ${e}`);
+      this.targetId = ""; // fallback
     }
   }
+
 
   async close() {
     if (this.browser) {

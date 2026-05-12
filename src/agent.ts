@@ -49,7 +49,7 @@ export type ManualPauseResult =
   | { action: "reprompt"; feedback: string }
   | { action: "modify"; checklist: Checklist };
 
-function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
+export function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   if (!obj) return;
   const map = (target: any) => {
     if (target && target.ref && refs[target.ref]) {
@@ -105,6 +105,97 @@ export interface AgentStepUpdate {
   action?: any;
   issues?: { description: string; severity: string }[];
   url?: string;
+}
+
+export async function planTask(params: {
+  model: LanguageModel;
+  requirement: string;
+  checklist: Checklist;
+  snapshot: string;
+  history: AgentHistoryMessage[];
+  planningPrompt: string;
+  screenshot?: Buffer;
+  supportsVision?: boolean;
+}): Promise<Checklist> {
+  console.log(`[Agent][Planner] Planning...`);
+  const planningResult = await generateObject({
+    model: params.model,
+    schema: ChecklistSchema,
+    system: params.planningPrompt,
+    messages: [
+      ...params.history,
+      {
+        role: "user",
+        content: [
+          {
+            type: "text" as const,
+            text: `Goal: ${params.requirement}\n\nChecklist: ${JSON.stringify(params.checklist, null, 2)}\n\nCurrent State:\n${params.snapshot}`,
+          },
+          ...(params.screenshot && params.supportsVision !== false
+            ? [{ type: "image" as const, image: params.screenshot }]
+            : []),
+        ],
+      },
+    ],
+  });
+  return planningResult.object;
+}
+
+export async function executeTask(params: {
+  model: LanguageModel;
+  requirement: string;
+  currentTask: { description: string };
+  checklist: Checklist;
+  snapshot: string;
+  history: AgentHistoryMessage[];
+  executionPromptTemplate: string;
+  screenshot?: Buffer;
+  supportsVision?: boolean;
+  consecutiveSameAction?: number;
+  serializer?: TestSerializer;
+}): Promise<ExecutionResponse> {
+  const currentIssues = params.serializer?.getTest()?.issues || params.checklist.issues || [];
+  const issuesSummary = currentIssues
+    .map((i) => `${i.id}: ${i.description}`)
+    .join("; ");
+
+  const knownIssuesText =
+    params.serializer && params.serializer.getTest()?.issues.length
+      ? `\n\nPreviously Identified Issues:\n${params.serializer
+          .getTest()
+          ?.issues.map((i) => `- ${i.id} (${i.severity}): ${i.description}`)
+          .join("\n")}`
+      : "";
+
+  const executionPrompt =
+    params.executionPromptTemplate
+      .replace("{taskDescription}", params.currentTask.description)
+      .replace("{overallGoal}", params.requirement) +
+    knownIssuesText;
+
+  console.log("[Agent][Executor] Beginning execution prompt");
+
+  const result = await generateObject({
+    model: params.model,
+    schema: ExecutionResponseSchema,
+    system: executionPrompt,
+    messages: [
+      ...params.history,
+      {
+        role: "user",
+        content: [
+          {
+            type: "text" as const,
+            text: `Goal: ${params.requirement}\nTask: ${params.currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${params.snapshot}${params.consecutiveSameAction && params.consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`,
+          },
+          ...(params.screenshot && params.supportsVision !== false
+            ? [{ type: "image" as const, image: params.screenshot }]
+            : []),
+        ],
+      },
+    ],
+  });
+  return result.object;
 }
 
 export async function runAgent(
@@ -220,30 +311,18 @@ export async function runAgent(
         );
       }
 
-      console.log(`[Agent][Planner] Planning...`);
       const planningStartTime = Date.now();
       if (onPlanning) onPlanning(true);
-        let planningResult;
         try {
-          planningResult = await generateObject({
+          checklist = await planTask({
             model,
-            schema: ChecklistSchema,
-            system: planningPrompt,
-            messages: [
-              ...history,
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "text" as const,
-                    text: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`,
-                  },
-                  ...(screenshot && supportsVision !== false
-                    ? [{ type: "image" as const, image: screenshot }]
-                    : []),
-                ],
-              },
-            ],
+            requirement,
+            checklist,
+            snapshot,
+            history,
+            planningPrompt,
+            screenshot,
+            supportsVision,
           });
         } catch (e: any) {
           if (onPlanning) onPlanning(false);
@@ -273,8 +352,7 @@ export async function runAgent(
           throw e;
         }
 
-        console.log("[Agent][Planner] Planning result:", planningResult.object);
-        checklist = planningResult.object;
+        console.log("[Agent][Planner] Planning result:", checklist);
         if (onChecklist) onChecklist(checklist);
         if (serializer) serializer.updateChecklist(checklist);
 
@@ -443,27 +521,19 @@ export async function runAgent(
 
           console.log("[Agent][Executor] Beginning execution prompt");
 
-          const result = await generateObject({
+          executionResponse = await executeTask({
             model,
-            schema: ExecutionResponseSchema,
-            system: executionPrompt,
-            messages: [
-              ...history,
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "text" as const,
-                    text: `Goal: ${requirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`,
-                  },
-                  ...(screenshot && supportsVision !== false
-                    ? [{ type: "image" as const, image: screenshot }]
-                    : []),
-                ],
-              },
-            ],
+            requirement,
+            currentTask,
+            checklist,
+            snapshot,
+            history,
+            executionPromptTemplate,
+            screenshot,
+            supportsVision,
+            consecutiveSameAction,
+            serializer,
           });
-          executionResponse = result.object;
           break;
         } catch (e: any) {
           retries++;
