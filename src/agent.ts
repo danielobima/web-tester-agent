@@ -125,10 +125,11 @@ export async function runAgent(
   onIssuesUpdate?: (issues: any[]) => void,
   signal?: AbortSignal,
   supportsVision?: boolean,
+  autoApprovePlan?: boolean,
 ) {
   const history: AgentHistoryMessage[] = [];
   let stepCounter = 1;
-  let needsPlanApproval = true;
+  let needsPlanApproval = !autoApprovePlan;
   let checklist: Checklist = {
     currentStateDescription: "Starting test execution",
     tasks: [],
@@ -159,6 +160,12 @@ export async function runAgent(
   let currentTaskBeforeUrl: string = "";
   let currentTaskBeforeScreenshot: Buffer | undefined = undefined;
   let lastTaskId: string | undefined = undefined;
+
+  console.log(
+    `[Agent] Starting test execution. autoApprovePlan: ${autoApprovePlan}`,
+  );
+  console.log(`[Agent] Running model: ${model}`);
+  console.log(`[Agent] Supports vision: ${supportsVision}`);
 
   try {
     while (stepCounter < 50) {

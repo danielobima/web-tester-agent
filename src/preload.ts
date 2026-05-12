@@ -1,9 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electron', {
-  startTest: (url: string, prompt: string) => {
-    ipcRenderer.send('start-test', { url, prompt });
-  },
   stopTest: () => {
     ipcRenderer.send('stop-test');
   },
@@ -13,7 +10,6 @@ contextBridge.exposeInMainWorld('electron', {
   replayTest: (suitePath?: string) => {
     ipcRenderer.send('replay-test', { suitePath });
   },
-  listSuites: () => ipcRenderer.invoke('list-suites'),
   getSuite: (suitePath: string) => ipcRenderer.invoke('get-suite', suitePath),
   getSuiteReport: (suitePath: string) => ipcRenderer.invoke('get-suite-report', suitePath),
   deleteSuite: (suitePath: string) => ipcRenderer.invoke('delete-suite', suitePath),
@@ -65,5 +61,30 @@ contextBridge.exposeInMainWorld('electron', {
     const subscription = (event: any, issues: any[]) => callback(issues);
     ipcRenderer.on('test-issues', subscription);
     return () => ipcRenderer.removeListener('test-issues', subscription);
+  },
+  
+  // Application Management
+  listApplications: () => ipcRenderer.invoke('list-applications'),
+  createApplication: (name: string, description?: string) => ipcRenderer.invoke('create-application', { name, description }),
+  deleteApplication: (appId: string) => ipcRenderer.invoke('delete-application', appId),
+
+  // Test Management
+  listTests: (appId?: string) => ipcRenderer.invoke('list-tests', appId),
+  createTest: (config: { appId: string, name: string, url: string, prompt: string, model: string }) => ipcRenderer.invoke('create-test', config),
+  updateTest: (testId: string, config: any) => ipcRenderer.invoke('update-test', { testId, config }),
+  deleteTest: (testId: string) => ipcRenderer.invoke('delete-test', testId),
+  getTest: (testId: string) => ipcRenderer.invoke('get-test', testId),
+  
+  // Agent Error Management
+  listAgentErrors: () => ipcRenderer.invoke('list-agent-errors'),
+  getAgentError: (errorId: string) => ipcRenderer.invoke('get-agent-error', errorId),
+  deleteAgentError: (errorId: string) => ipcRenderer.invoke('delete-agent-error', errorId),
+
+  // Configuration
+  getConfig: () => ipcRenderer.invoke("get-config"),
+  saveConfig: (config: any) => ipcRenderer.invoke("save-config", config),
+
+  startTest: (url: string, prompt: string, testId?: string, model?: string) => {
+    ipcRenderer.send('start-test', { url, prompt, testId, model });
   }
 });

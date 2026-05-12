@@ -27,21 +27,23 @@
 ✔ Remove usability array and just have issues array and the agent to assign severity to each issue @done(26-04-27 16:47)
 ✔ We are getting duplicate issues @done(26-05-04 11:26)
 ☐ Systematic formal way of testing: a testing framework can take a subset of the dataset
-    ✔ I should be able to dispatch the test directly from the website @done(26-05-05 12:33)
-    ☐ I should be able to see test logs and results in the website
+    ✔ Create a sample notebook showing how to use the framework @done(26-05-12 12:26)
+    ☐ Demonstrate how model efficiency can be increased by training using QLoRA and 4-bit quantization
 ✔ Should be able to actually catch bugs, demo a test where there is a known defect @done(26-05-04 11:27)
-☐ A systematic way to store agent errors, (No object generated, failed action execution etc)
+✔ A systematic way to store agent errors, (No object generated, failed action execution etc) @done(26-05-12 12:31)
 ☐ Fix tab not found error when an existing chrome window is open - Also unable to know which tab is active
-☐ Implement a wait command
+☐ Implement a wait command - Test
 ☐ Add autocomplete for website urls
 ☐ Fix execution retry not working
+✔ Add model selection in the frontend @done(26-05-12 12:15)
+✔ Should be able to run replay in the test details page @done(26-05-12 12:15)
 ✔ In smaller screens the model card overlaps the execution stream @done(26-04-14 15:36)
 ✔ Should not show "successfully finished execution" text in the UI until after the user has approved @done(26-05-04 11:17)
-☐ Enable running on headless mode
-☐ CLI optimization
-☐ Scroll interaction
+☐ Enable running on headless mode - needs testing
+☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
+☐ Scroll interaction - Only relevant for vision models - needs testing
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
-☐ Create an application to group tests into suites
+✔ Create an application to group tests into suites @done(26-05-12 12:15)
 ☐ Enable export markdown to pdf
 ☐ Generation of markdown testing report for replay. User should be able to choose whether they want report for success, failed or both. 
 ☐ Device emulation

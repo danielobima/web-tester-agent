@@ -7,14 +7,6 @@ declare global {
       stopTest: () => void;
       approvePlan: (result: { action: 'accept' | 'modify' | 'reject', checklist?: any }) => void;
       replayTest: (suitePath?: string) => void;
-      listSuites: () => Promise<Array<{
-        id: string;
-        name: string;
-        url: string;
-        stepsCount: number;
-        path: string;
-        createdAt: number;
-      }>>;
       getSuite: (suitePath: string) => Promise<any>;
       deleteSuite: (suitePath: string) => Promise<{ success: boolean; error?: string }>;
       onTestStep: (callback: (step: TestStep) => void) => () => void;
@@ -27,6 +19,31 @@ declare global {
       onPauseRequest: (callback: (checklist: any) => void) => () => void;
       onTestComplete: (callback: (result: { success: boolean; error?: string; duration?: string }) => void) => () => void;
       onPlanningState: (callback: (isPlanning: boolean) => void) => () => void;
+      onTestIssues: (callback: (issues: any[]) => void) => () => void;
+      getSuiteReport: (suitePath: string) => Promise<string>;
+
+      // Application Management
+      listApplications: () => Promise<any[]>;
+      createApplication: (name: string, description?: string) => Promise<any>;
+      deleteApplication: (appId: string) => Promise<{ success: boolean }>;
+
+      // Test Management
+      listTests: (appId?: string) => Promise<any[]>;
+      createTest: (config: { appId: string, name: string, url: string, prompt: string, model: string }) => Promise<any>;
+      updateTest: (testId: string, config: any) => Promise<any>;
+      deleteTest: (testId: string) => Promise<{ success: boolean }>;
+      getTest: (testId: string) => Promise<any>;
+
+      // Agent Error Management
+      listAgentErrors: () => Promise<any[]>;
+      getAgentError: (errorId: string) => Promise<any>;
+      deleteAgentError: (errorId: string) => Promise<{ success: boolean }>;
+
+      // Configuration
+      getConfig: () => Promise<any>;
+      saveConfig: (config: any) => Promise<{ success: boolean }>;
+
+      startTest: (url: string, prompt: string, testId?: string, model?: string) => void;
     };
   }
 }

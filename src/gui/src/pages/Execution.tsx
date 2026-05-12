@@ -160,7 +160,7 @@ export const Execution = () => {
 
   const handleReset = () => {
     setHasFailed(false);
-    navigate("/");
+    navigate(-1);
   };
 
   const handleReplay = () => {
@@ -244,7 +244,7 @@ export const Execution = () => {
                   onClick={handleReset}
                   className="text-xs font-bold uppercase tracking-widest text-primary hover:underline flex items-center gap-2"
                 >
-                  <Icons.ChevronLeft /> Back to Builder
+                  <Icons.ChevronLeft /> Back to Test Details
                 </button>
                 {completedSuitePath && (
                   <button

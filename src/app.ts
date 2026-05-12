@@ -10,6 +10,8 @@ import * as dotenv from "dotenv";
 import * as fs from "fs/promises";
 import { generateMarkdownReport } from "./reporter";
 import { isVisionModel } from "./utils";
+import * as data from "./data";
+import { createModel } from "./models";
 
 dotenv.config();
 
@@ -26,9 +28,7 @@ let goalValidationPromise: { resolve: (val: any) => void; reject: (err: any) => 
 let pausePromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
 let isPaused = false;
 
-const modelName = "gemini-3.1-flash-lite-preview";
-const model = google(modelName);
-const supportsVision = isVisionModel("google", modelName);
+// Model configuration is now handled dynamically via getConfig() and models.ts
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -94,7 +94,7 @@ app.whenReady().then(async () => {
 
   createWindow();
 
-  ipcMain.on("start-test", async (event, { url, prompt }) => {
+  ipcMain.on("start-test", async (event, { url, prompt, testId, model }) => {
     const browser = new BrowserManager();
     const testStartTime = Date.now();
     const serializer = new TestSerializer();
@@ -106,20 +106,26 @@ app.whenReady().then(async () => {
     const sessionScreenshotsDir = path.join(suitesDir, `suite-${suiteName}-${timestamp}.screenshots`);
     await fs.mkdir(sessionScreenshotsDir, { recursive: true });
     
+    const artifactsDir = app.getPath("userData");
+    const config = await data.getConfig();
+    const modelConfig = config.models.find(m => m.id === model) || config.models[0];
+    const aiModel = createModel(modelConfig);
+    const modelSupportsVision = isVisionModel(modelConfig.provider, modelConfig.modelName);
+
     serializer.startTest(prompt, url);
     serializer.setOutPath(suitePath);
 
     activeTestController = new AbortController();
     try {
-      await browser.init(false);
+      await browser.init(config.headless || false);
       await browser.execute({ kind: "navigate", url });
 
       await runAgent(
         prompt,
         browser,
-        model as any,
+        aiModel,
         serializer,
-        undefined,
+        artifactsDir,
         false,
         false,
         (update) => {
@@ -142,11 +148,13 @@ app.whenReady().then(async () => {
             mainWindow?.webContents.send("goal-reached", checklist);
           });
         },
-        (isPlanning: boolean) => {
-          if (mainWindow) mainWindow.webContents.send("test-planning-state", isPlanning);
+        (planning) => {
+          if (mainWindow) mainWindow.webContents.send("test-planning-state", planning);
         },
         async (checklist) => {
+          if (!mainWindow) return { action: 'resume' };
           if (!isPaused) return { action: 'resume' };
+          
           return new Promise((resolve, reject) => {
             pausePromise = { resolve, reject };
             mainWindow?.webContents.send("pause-request", checklist);
@@ -156,36 +164,49 @@ app.whenReady().then(async () => {
         (issues) => {
           if (mainWindow) mainWindow.webContents.send("test-issues", issues);
         },
-        activeTestController?.signal,
-        supportsVision,
+        activeTestController.signal,
+        modelSupportsVision,
+        !config.requirePlanApproval
       );
 
-      if (mainWindow) {
-        const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-        await serializer.saveTest(lastRunPath);
-        
-        // Generate markdown report
-        const testData = serializer.getTest();
-        if (testData) {
-          const reportFileName = path.basename(suitePath).replace(".json", ".report.md");
-          await generateMarkdownReport(testData, suitesDir, reportFileName);
-        }
+      const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
 
+      // Link result to test ID if provided
+      if (testId) {
+        const tests = await data.listTests();
+        const testIndex = tests.findIndex(t => t.id === testId);
+        if (testIndex !== -1) {
+          tests[testIndex].lastRunPath = suitePath;
+          await data.saveTests(tests);
+        }
+      }
+
+      // Generate markdown report
+      const testData = serializer.getTest();
+      if (testData) {
+        const reportFileName = path.basename(suitePath).replace(".json", ".report.md");
+        await generateMarkdownReport(testData, suitesDir, reportFileName);
+      }
+
+      if (mainWindow) {
         mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration, suitePath });
       }
     } catch (error: any) {
       console.error("Test execution failed:", error);
       if (mainWindow) {
+        const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
+        mainWindow.webContents.send("test-complete", {
+          success: false,
+          error: error.message,
+          duration: totalDuration,
+        });
         mainWindow.webContents.send("test-step", {
           id: "error",
           step: "Execution Error",
           status: "failed",
-          duration: "0s",
+          duration: "ERR",
           description: error.message,
-          error: error.stack,
         });
-        const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-        mainWindow.webContents.send("test-complete", { success: false, error: error.message, duration: totalDuration });
       }
     } finally {
       await browser.close();
@@ -241,15 +262,21 @@ app.whenReady().then(async () => {
     const testStartTime = Date.now();
     const targetPath = suitePath || path.join(app.getPath("userData"), "last-run.json");
     activeTestController = new AbortController();
+    
+    const config = await data.getConfig();
+    const modelConfig = config.models.find(m => m.id === config.defaultModelId) || config.models[0];
+    const aiModel = createModel(modelConfig);
+    const modelSupportsVision = isVisionModel(modelConfig.provider, modelConfig.modelName);
+
     try {
-      await browser.init(false);
-      await replayTest(targetPath, browser, model as any, undefined, false, false, (update) => {
+      await browser.init(config.headless || false);
+      await replayTest(targetPath, browser, aiModel, undefined, false, false, (update) => {
         if (mainWindow) mainWindow.webContents.send("test-step", update);
       }, (checklist) => {
         if (mainWindow) mainWindow.webContents.send("test-checklist", checklist);
       }, (isPlanning: boolean) => {
         if (mainWindow) mainWindow.webContents.send("test-planning-state", isPlanning);
-      }, activeTestController.signal, supportsVision);
+      }, activeTestController.signal, modelSupportsVision, !config.requirePlanApproval);
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
         mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration });
@@ -265,23 +292,6 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle("list-suites", async () => {
-    try {
-      await fs.mkdir(suitesDir, { recursive: true });
-      const files = await fs.readdir(suitesDir);
-      const suites = [];
-      for (const file of files) {
-        if (file.endsWith(".json")) {
-          const content = await fs.readFile(path.join(suitesDir, file), "utf-8");
-          const data = JSON.parse(content);
-          suites.push({ id: data.id, name: data.name, url: data.startUrl, stepsCount: data.steps?.length || 0, path: path.join(suitesDir, file), createdAt: data.id.split("-")[1] ? parseInt(data.id.split("-")[1]) : 0 });
-        }
-      }
-      return suites.sort((a, b) => b.createdAt - a.createdAt);
-    } catch (error) {
-      return [];
-    }
-  });
 
   ipcMain.handle("get-suite", async (event, suitePath) => {
     try {
@@ -308,6 +318,158 @@ app.whenReady().then(async () => {
       return content;
     } catch (error: any) {
       return `### Report not found\n\nCould not load report for ${suitePath}`;
+    }
+  });
+
+  // Application Management
+  ipcMain.handle("list-applications", async () => {
+    return await data.listApplications();
+  });
+
+  ipcMain.handle("create-application", async (event, { name, description }) => {
+    const apps = await data.listApplications();
+    const newApp: data.Application = {
+      id: `app-${Date.now()}`,
+      name,
+      description,
+      createdAt: Date.now(),
+    };
+    apps.push(newApp);
+    await data.saveApplications(apps);
+    return newApp;
+  });
+
+  ipcMain.handle("delete-application", async (event, appId) => {
+    const apps = await data.listApplications();
+    const filteredApps = apps.filter(a => a.id !== appId);
+    await data.saveApplications(filteredApps);
+    
+    // Also delete associated tests
+    const tests = await data.listTests();
+    const remainingTests = tests.filter(t => t.appId !== appId);
+    await data.saveTests(remainingTests);
+    
+    return { success: true };
+  });
+
+  // Test Management
+  ipcMain.handle("list-tests", async (event, appId) => {
+    return await data.listTests(appId);
+  });
+
+  ipcMain.handle("create-test", async (event, { appId, name, url, prompt, model }) => {
+    const tests = await data.listTests();
+    const newTest: data.Test = {
+      id: `test-${Date.now()}`,
+      appId,
+      name,
+      url,
+      prompt,
+      model,
+      createdAt: Date.now(),
+    };
+    tests.push(newTest);
+    await data.saveTests(tests);
+    return newTest;
+  });
+
+  ipcMain.handle("update-test", async (event, { testId, config }) => {
+    const tests = await data.listTests();
+    const index = tests.findIndex(t => t.id === testId);
+    if (index !== -1) {
+      tests[index] = { ...tests[index], ...config };
+      await data.saveTests(tests);
+      return tests[index];
+    }
+    throw new Error("Test not found");
+  });
+
+  ipcMain.handle("delete-test", async (event, testId) => {
+    const tests = await data.listTests();
+    const filteredTests = tests.filter(t => t.id !== testId);
+    await data.saveTests(filteredTests);
+    return { success: true };
+  });
+
+  ipcMain.handle("get-test", async (event, testId) => {
+    const tests = await data.listTests();
+    return tests.find(t => t.id === testId);
+  });
+
+  // Configuration Management
+  ipcMain.handle("get-config", async () => {
+    return await data.getConfig();
+  });
+
+  ipcMain.handle("save-config", async (event, config) => {
+    await data.saveConfig(config);
+    return { success: true };
+  });
+
+  // Agent Error Management
+  ipcMain.handle("list-agent-errors", async () => {
+    const errorBaseDir = path.join(app.getPath("userData"), "errors");
+    try {
+      await fs.mkdir(errorBaseDir, { recursive: true });
+      const dirs = await fs.readdir(errorBaseDir);
+      const errors = [];
+      for (const dir of dirs) {
+        try {
+          const reportPath = path.join(errorBaseDir, dir, "report.json");
+          const content = await fs.readFile(reportPath, "utf-8");
+          const report = JSON.parse(content);
+          errors.push({
+            id: dir,
+            timestamp: report.timestamp,
+            message: report.error.message,
+            type: report.error.type,
+            url: report.environment.url,
+            path: path.join(errorBaseDir, dir)
+          });
+        } catch (e) {
+          // Skip if no report.json
+        }
+      }
+      return errors.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    } catch (error) {
+      return [];
+    }
+  });
+
+  ipcMain.handle("get-agent-error", async (event, errorId) => {
+    const errorDir = path.join(app.getPath("userData"), "errors", errorId);
+    try {
+      const reportContent = await fs.readFile(path.join(errorDir, "report.json"), "utf-8");
+      const report = JSON.parse(reportContent);
+      
+      let snapshot = "";
+      try { snapshot = await fs.readFile(path.join(errorDir, "snapshot.txt"), "utf-8"); } catch (e) {}
+      
+      let axTree = null;
+      try { 
+        const axTreeContent = await fs.readFile(path.join(errorDir, "axtree.json"), "utf-8");
+        axTree = JSON.parse(axTreeContent);
+      } catch (e) {}
+
+      return {
+        ...report,
+        id: errorId,
+        snapshot,
+        axTree,
+        screenshotPath: path.join(errorDir, "screenshot.png")
+      };
+    } catch (error) {
+      throw error;
+    }
+  });
+
+  ipcMain.handle("delete-agent-error", async (event, errorId) => {
+    const errorDir = path.join(app.getPath("userData"), "errors", errorId);
+    try {
+      await fs.rm(errorDir, { recursive: true, force: true });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: (error as any).message };
     }
   });
 

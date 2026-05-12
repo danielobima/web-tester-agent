@@ -221,6 +221,7 @@ export async function replayTest(
   onPlanning?: (isPlanning: boolean) => void,
   signal?: AbortSignal,
   supportsVision?: boolean,
+  autoApprovePlan?: boolean,
 ) {
   const serializer = new TestSerializer();
   const test = await serializer.loadTest(filePath);

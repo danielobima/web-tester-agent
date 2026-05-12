@@ -1,9 +1,12 @@
 import { HashRouter as Router, Routes, Route } from "react-router-dom";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Header } from "./components/layout/Header";
-import { Dashboard } from "./pages/Dashboard";
-import { Suites } from "./pages/Suites";
+import { Applications } from "./pages/Applications";
+import { ApplicationDetails } from "./pages/ApplicationDetails";
+import { TestDetails } from "./pages/TestDetails";
 import { Execution } from "./pages/Execution";
+import { AgentErrors } from "./pages/AgentErrors";
+import { Settings } from "./pages/Settings";
 import { Icons } from "./components/ui/Icons";
 
 function App() {
@@ -16,10 +19,14 @@ function App() {
           <Header />
 
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/suites" element={<Suites />} />
+            <Route path="/" element={<Applications />} />
+            <Route path="/applications" element={<Applications />} />
+            <Route path="/applications/:appId" element={<ApplicationDetails />} />
+            <Route path="/tests/:testId" element={<TestDetails />} />
             <Route path="/execution" element={<Execution />} />
-            <Route path="*" element={<Dashboard />} />
+            <Route path="/errors" element={<AgentErrors />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Applications />} />
           </Routes>
 
           {/* Floating Action Button (Optional, can be contextualized) */}
