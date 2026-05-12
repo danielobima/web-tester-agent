@@ -326,30 +326,6 @@ export async function runAgent(
             `[Agent] Planner indicates goal achieved: ${checklist.currentStateDescription}`,
           );
         }
-      } catch (e: any) {
-        if (onPlanning) onPlanning(false);
-        console.error(`[Agent][Planner] Planning failed: ${e.message}`);
-
-        if (artifactsDir) {
-          await saveAgentErrorReport(
-            artifactsDir,
-            {
-              error: e,
-              type: "planning",
-              step: stepCounter,
-              requirement,
-              url: currentUrl,
-              history: [...history],
-              snapshot,
-              axTree,
-              refs,
-              checklist,
-              llmPrompt: planningPrompt,
-            },
-            browser,
-          );
-        }
-      }
 
       if (checklist.isGoalAchieved) {
         if (onGoalReached) {
