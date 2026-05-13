@@ -11,7 +11,7 @@ interface Checklist {
   currentStateDescription: string;
   tasks: Task[];
   nextTaskId?: string;
-  isGoalAchieved: boolean;
+  finished: boolean;
 }
 
 export type ManualPauseResult = 

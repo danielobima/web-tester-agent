@@ -131,7 +131,7 @@ export async function planTask(params: {
             type: "text" as const,
             text: `Goal: ${params.requirement}\n\nChecklist: ${JSON.stringify(params.checklist, null, 2)}\n\nCurrent State:\n${params.snapshot}`,
           },
-          ...(params.screenshot && params.supportsVision !== false
+          ...(params.screenshot && params.supportsVision
             ? [{ type: "image" as const, image: params.screenshot }]
             : []),
         ],
@@ -154,7 +154,8 @@ export async function executeTask(params: {
   consecutiveSameAction?: number;
   serializer?: TestSerializer;
 }): Promise<ExecutionResponse> {
-  const currentIssues = params.serializer?.getTest()?.issues || params.checklist.issues || [];
+  const currentIssues =
+    params.serializer?.getTest()?.issues || params.checklist.issues || [];
   const issuesSummary = currentIssues
     .map((i) => `${i.id}: ${i.description}`)
     .join("; ");
@@ -170,8 +171,7 @@ export async function executeTask(params: {
   const executionPrompt =
     params.executionPromptTemplate
       .replace("{taskDescription}", params.currentTask.description)
-      .replace("{overallGoal}", params.requirement) +
-    knownIssuesText;
+      .replace("{overallGoal}", params.requirement) + knownIssuesText;
 
   console.log("[Agent][Executor] Beginning execution prompt");
 
@@ -188,7 +188,7 @@ export async function executeTask(params: {
             type: "text" as const,
             text: `Goal: ${params.requirement}\nTask: ${params.currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${params.snapshot}${params.consecutiveSameAction && params.consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`,
           },
-          ...(params.screenshot && params.supportsVision !== false
+          ...(params.screenshot && params.supportsVision
             ? [{ type: "image" as const, image: params.screenshot }]
             : []),
         ],
@@ -224,7 +224,7 @@ export async function runAgent(
   let checklist: Checklist = {
     currentStateDescription: "Starting test execution",
     tasks: [],
-    isGoalAchieved: false,
+    finished: false,
     issues: [],
   };
 
@@ -266,7 +266,7 @@ export async function runAgent(
         const pauseResult = await onManualPause(checklist);
         if (pauseResult.action === "reprompt") {
           requirement += `\nLatest User Feedback: ${pauseResult.feedback}`;
-          checklist.isGoalAchieved = false;
+          checklist.finished = false;
           needsPlanApproval = true;
           // No break/continue needed here, it will naturally re-plan below
         } else if (pauseResult.action === "modify") {
@@ -313,99 +313,99 @@ export async function runAgent(
 
       const planningStartTime = Date.now();
       if (onPlanning) onPlanning(true);
-        try {
-          checklist = await planTask({
-            model,
-            requirement,
-            checklist,
-            snapshot,
-            history,
-            planningPrompt,
-            screenshot,
-            supportsVision,
-          });
-        } catch (e: any) {
-          if (onPlanning) onPlanning(false);
-          const rawResponse = e.text || (e.cause?.text) || (e.response?.text);
-          console.log(`[Agent][Planner] Raw response:`, rawResponse);
+      try {
+        checklist = await planTask({
+          model,
+          requirement,
+          checklist,
+          snapshot,
+          history,
+          planningPrompt,
+          screenshot,
+          supportsVision,
+        });
+      } catch (e: any) {
+        if (onPlanning) onPlanning(false);
+        const rawResponse = e.text || e.cause?.text || e.response?.text;
+        console.log(`[Agent][Planner] Raw response:`, rawResponse);
 
-          if (artifactsDir) {
-            await saveAgentErrorReport(
-              artifactsDir,
-              {
-                error: e,
-                type: "planning",
-                step: stepCounter,
-                requirement,
-                url: currentUrl,
-                history: [...history],
-                snapshot,
-                axTree,
-                refs,
-                checklist,
-                llmPrompt: planningPrompt,
-                llmRawResponse: rawResponse,
-              },
-              browser,
-            );
-          }
-          throw e;
-        }
-
-        console.log("[Agent][Planner] Planning result:", checklist);
-        if (onChecklist) onChecklist(checklist);
-        if (serializer) serializer.updateChecklist(checklist);
-
-        if (needsPlanApproval && onPlanApproval) {
-          if (onPlanning) onPlanning(false);
-          const approvalResult = await onPlanApproval(checklist);
-          if (approvalResult.action === "reject")
-            throw new Error("Plan rejected by user");
-          if (approvalResult.action === "modify") {
-            checklist = approvalResult.checklist;
-            if (onChecklist) onChecklist(checklist);
-            if (serializer) serializer.updateChecklist(checklist);
-          }
-          needsPlanApproval = false;
-        }
-
-        // Safety: If no next task is found but the goal isn't marked as achieved,
-        // check if all existing tasks are finished. If so, treat it as goal completion.
-        const allTasksFinished =
-          checklist.tasks.length > 0 &&
-          checklist.tasks.every(
-            (t) => t.status === "completed" || t.status === "failed",
-          );
-        if (
-          !checklist.nextTaskId &&
-          !checklist.isGoalAchieved &&
-          allTasksFinished
-        ) {
-          console.log(
-            "[Agent] Implicit goal achievement detected (all tasks finished).",
-          );
-          checklist.isGoalAchieved = true;
-        }
-
-        if (!checklist.isGoalAchieved) {
-          history.push({
-            role: "assistant",
-            content: [
-              {
-                type: "text" as const,
-                text: `I am updating the plan. ${checklist.currentStateDescription}. ${checklist.tasks.length} tasks in total.`,
-              },
-            ],
-          });
-          if (history.length > 20) history.splice(0, 2);
-        }
-        if (checklist.isGoalAchieved) {
-          console.log(
-            `[Agent] Planner indicates goal achieved: ${checklist.currentStateDescription}`,
+        if (artifactsDir) {
+          await saveAgentErrorReport(
+            artifactsDir,
+            {
+              error: e,
+              type: "planning",
+              step: stepCounter,
+              requirement,
+              url: currentUrl,
+              history: [...history],
+              snapshot,
+              axTree,
+              refs,
+              checklist,
+              llmPrompt: planningPrompt,
+              llmRawResponse: rawResponse,
+            },
+            browser,
           );
         }
+        throw e;
+      }
 
-      if (checklist.isGoalAchieved) {
+      console.log("[Agent][Planner] Planning result:", checklist);
+      if (onChecklist) onChecklist(checklist);
+      if (serializer) serializer.updateChecklist(checklist);
+
+      if (needsPlanApproval && onPlanApproval) {
+        if (onPlanning) onPlanning(false);
+        const approvalResult = await onPlanApproval(checklist);
+        if (approvalResult.action === "reject")
+          throw new Error("Plan rejected by user");
+        if (approvalResult.action === "modify") {
+          checklist = approvalResult.checklist;
+          if (onChecklist) onChecklist(checklist);
+          if (serializer) serializer.updateChecklist(checklist);
+        }
+        needsPlanApproval = false;
+      }
+
+      // Safety: If no next task is found but the goal isn't marked as achieved,
+      // check if all existing tasks are finished. If so, treat it as goal completion.
+      const allTasksFinished =
+        checklist.tasks.length > 0 &&
+        checklist.tasks.every(
+          (t) => t.status === "completed" || t.status === "failed",
+        );
+      if (
+        !checklist.nextTaskId &&
+        !checklist.finished &&
+        allTasksFinished
+      ) {
+        console.log(
+          "[Agent] Implicit goal achievement detected (all tasks finished).",
+        );
+        checklist.finished = true;
+      }
+
+      if (!checklist.finished) {
+        history.push({
+          role: "assistant",
+          content: [
+            {
+              type: "text" as const,
+              text: `I am updating the plan. ${checklist.currentStateDescription}. ${checklist.tasks.length} tasks in total.`,
+            },
+          ],
+        });
+        if (history.length > 20) history.splice(0, 2);
+      }
+      if (checklist.finished) {
+        console.log(
+          `[Agent] Planner indicates goal achieved: ${checklist.currentStateDescription}`,
+        );
+      }
+
+      if (checklist.finished) {
         if (onGoalReached) {
           if (screenshot && screenshotsDir) {
             checklist.screenshot = screenshotPath;
@@ -428,7 +428,7 @@ export async function runAgent(
               `[Agent] Human prompted further: ${validationResult.feedback}`,
             );
             requirement += `\nLatest User Feedback: ${validationResult.feedback}`;
-            checklist.isGoalAchieved = false;
+            checklist.finished = false;
             needsPlanApproval = true; // Force re-approval of the next plan
             continue; // Go back to planning
           }
@@ -553,7 +553,7 @@ export async function runAgent(
             errorMessage = `Schema validation failed:\n${details}`;
           }
 
-          const rawResponse = e.text || (e.cause?.text) || (e.response?.text);
+          const rawResponse = e.text || e.cause?.text || e.response?.text;
           console.log(`[Agent][Executor] Raw response:`, rawResponse);
           history.push({
             role: "assistant",
@@ -770,7 +770,7 @@ export async function runAgent(
                       type: "text" as const,
                       text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`,
                     },
-                    ...(currentTaskBeforeScreenshot && supportsVision !== false
+                    ...(currentTaskBeforeScreenshot && supportsVision
                       ? [
                           {
                             type: "image" as const,
@@ -778,7 +778,7 @@ export async function runAgent(
                           },
                         ]
                       : []),
-                    ...(afterActionScreenshot && supportsVision !== false
+                    ...(afterActionScreenshot && supportsVision
                       ? [
                           {
                             type: "image" as const,
@@ -832,7 +832,7 @@ export async function runAgent(
             break;
           } catch (e: any) {
             assertionRetries++;
-            const rawResponse = e.text || (e.cause?.text) || (e.response?.text);
+            const rawResponse = e.text || e.cause?.text || e.response?.text;
             console.log(`[Agent][Asserter] Raw response:`, rawResponse);
 
             if (assertionRetries >= 3 && artifactsDir) {
@@ -924,7 +924,7 @@ export async function runAgent(
 
       if (action.kind === "screenshot" && action.name === "success") {
         console.log(`[Agent][Executor] Final success milestone reached.`);
-        checklist.isGoalAchieved = true;
+        checklist.finished = true;
       }
 
       stepCounter++;

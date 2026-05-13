@@ -14,7 +14,7 @@ export interface Test {
   appId: string;
   name: string;
   url: string;
-  prompt: string;
+  requirement: string;
   model: string;
   createdAt: number;
   lastRunPath?: string;

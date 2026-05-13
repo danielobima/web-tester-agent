@@ -94,13 +94,13 @@ app.whenReady().then(async () => {
 
   createWindow();
 
-  ipcMain.on("start-test", async (event, { url, prompt, testId, model }) => {
+  ipcMain.on("start-test", async (event, { url, requirement, testId, model }) => {
     const browser = new BrowserManager();
     const testStartTime = Date.now();
     const serializer = new TestSerializer();
     const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
     
-    const suiteName = prompt.slice(0, 30).replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    const suiteName = requirement.slice(0, 30).replace(/[^a-z0-9]/gi, "_").toLowerCase();
     const timestamp = Date.now();
     const suitePath = path.join(suitesDir, `suite-${suiteName}-${timestamp}.json`);
     const sessionScreenshotsDir = path.join(suitesDir, `suite-${suiteName}-${timestamp}.screenshots`);
@@ -112,7 +112,7 @@ app.whenReady().then(async () => {
     const aiModel = createModel(modelConfig);
     const modelSupportsVision = config.enableVision && isVisionModel(modelConfig.provider, modelConfig.modelName);
 
-    serializer.startTest(prompt, url);
+    serializer.startTest(requirement, url);
     serializer.setOutPath(suitePath);
 
     activeTestController = new AbortController();
@@ -121,7 +121,7 @@ app.whenReady().then(async () => {
       await browser.execute({ kind: "navigate", url });
 
       await runAgent(
-        prompt,
+        requirement,
         browser,
         aiModel,
         serializer,
@@ -145,7 +145,7 @@ app.whenReady().then(async () => {
           if (!mainWindow) return { action: 'validate' };
           return new Promise((resolve, reject) => {
             goalValidationPromise = { resolve, reject };
-            mainWindow?.webContents.send("goal-reached", checklist);
+            mainWindow?.webContents.send("execution-finished", checklist);
           });
         },
         (planning) => {
@@ -243,7 +243,7 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.on("goal-validation-response", (event, result) => {
+  ipcMain.on("completion-validation-response", (event, result) => {
     if (goalValidationPromise) {
       goalValidationPromise.resolve(result);
       goalValidationPromise = null;
@@ -357,14 +357,14 @@ app.whenReady().then(async () => {
     return await data.listTests(appId);
   });
 
-  ipcMain.handle("create-test", async (event, { appId, name, url, prompt, model }) => {
+  ipcMain.handle("create-test", async (event, { appId, name, url, requirement, model }) => {
     const tests = await data.listTests();
     const newTest: data.Test = {
       id: `test-${Date.now()}`,
       appId,
       name,
       url,
-      prompt,
+      requirement,
       model,
       createdAt: Date.now(),
     };

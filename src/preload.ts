@@ -28,13 +28,13 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('plan-approval-request', subscription);
     return () => ipcRenderer.removeListener('plan-approval-request', subscription);
   },
-  onGoalReached: (callback: (checklist: any) => void) => {
+  onExecutionFinished: (callback: (checklist: any) => void) => {
     const subscription = (event: any, checklist: any) => callback(checklist);
-    ipcRenderer.on('goal-reached', subscription);
-    return () => ipcRenderer.removeListener('goal-reached', subscription);
+    ipcRenderer.on('execution-finished', subscription);
+    return () => ipcRenderer.removeListener('execution-finished', subscription);
   },
-  sendGoalValidationResponse: (result: any) => {
-    ipcRenderer.send('goal-validation-response', result);
+  sendCompletionValidationResponse: (result: any) => {
+    ipcRenderer.send('completion-validation-response', result);
   },
   pauseTest: () => {
     ipcRenderer.send('pause-test');
@@ -70,7 +70,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Test Management
   listTests: (appId?: string) => ipcRenderer.invoke('list-tests', appId),
-  createTest: (config: { appId: string, name: string, url: string, prompt: string, model: string }) => ipcRenderer.invoke('create-test', config),
+  createTest: (config: { appId: string, name: string, url: string, requirement: string, model: string }) => ipcRenderer.invoke('create-test', config),
   updateTest: (testId: string, config: any) => ipcRenderer.invoke('update-test', { testId, config }),
   deleteTest: (testId: string) => ipcRenderer.invoke('delete-test', testId),
   getTest: (testId: string) => ipcRenderer.invoke('get-test', testId),
@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld('electron', {
   getConfig: () => ipcRenderer.invoke("get-config"),
   saveConfig: (config: any) => ipcRenderer.invoke("save-config", config),
 
-  startTest: (url: string, prompt: string, testId?: string, model?: string) => {
-    ipcRenderer.send('start-test', { url, prompt, testId, model });
+  startTest: (url: string, requirement: string, testId?: string, model?: string) => {
+    ipcRenderer.send('start-test', { url, requirement, testId, model });
   }
 });

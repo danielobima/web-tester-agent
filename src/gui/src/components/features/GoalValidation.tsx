@@ -10,17 +10,17 @@ interface Issue {
 interface Checklist {
   currentStateDescription: string;
   tasks: { id: string; description: string; status: string; result?: string }[];
-  isGoalAchieved: boolean;
+  finished: boolean;
   screenshot?: string;
   issues?: Issue[];
 }
 
-interface GoalValidationProps {
+interface ExecutionCompletionProps {
   checklist: Checklist;
   onAction: (action: "validate" | "prompt" | "cancel", feedback?: string) => void;
 }
 
-export const GoalValidation = ({ checklist, onAction }: GoalValidationProps) => {
+export const ExecutionCompletion = ({ checklist, onAction }: ExecutionCompletionProps) => {
   const [feedback, setFeedback] = useState("");
 
   const getSeverityColor = (severity: string) => {
@@ -39,7 +39,7 @@ export const GoalValidation = ({ checklist, onAction }: GoalValidationProps) => 
         {/* Header */}
         <div className="p-6 border-b border-on-surface/5 flex items-center justify-between bg-surface-low/50">
           <div>
-            <h2 className="text-2xl font-bold font-display tracking-tight text-on-surface">Test Completion Review</h2>
+            <h2 className="text-2xl font-bold font-display tracking-tight text-on-surface">Execution Completion Review</h2>
             <p className="text-on-surface/50 text-xs font-medium uppercase tracking-widest mt-1">Senior QA Validation Phase</p>
           </div>
           <div className="p-3 bg-primary/10 text-primary rounded-md shadow-inner">
@@ -149,7 +149,7 @@ export const GoalValidation = ({ checklist, onAction }: GoalValidationProps) => 
                 <textarea 
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
-                  placeholder="The goal was not fully achieved. Here is what's missing..."
+                  placeholder="Execution was not fully completed. Here is what's missing..."
                   className="w-full h-28 bg-surface-low border border-on-surface/10 rounded-md p-4 text-sm font-medium outline-none focus:ring-1 ring-primary/30 placeholder:text-on-surface/20 resize-none transition-all focus:bg-surface-lowest"
                 />
                 <div className="absolute right-3 bottom-3 text-[9px] font-bold text-on-surface/20 uppercase tracking-widest">

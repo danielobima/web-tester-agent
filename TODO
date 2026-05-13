@@ -39,10 +39,13 @@
 ✔ Should be able to run replay in the test details page @done(26-05-12 12:15)
 ✔ In smaller screens the model card overlaps the execution stream @done(26-04-14 15:36)
 ✔ Should not show "successfully finished execution" text in the UI until after the user has approved @done(26-05-04 11:17)
-☐ Enable running on headless mode - needs testing
+✔ Enable running on headless mode - needs testing @done(26-05-13 11:55)
 ☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
 ☐ Scroll interaction - Only relevant for vision models - needs testing
 ☐ Implement retry for the planning agent
+☐ We dont have a screenshot of the final state in the report, only the state before the final step
+☐ When testing negative cases "EG verify something is not..." the agent get lazy 
+☐ Telling the user that the goal was acheived is a bit misleading if there were issues found, maybe we just say execution completed or something similar
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
 ☐ Enable export markdown to pdf

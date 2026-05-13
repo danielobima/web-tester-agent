@@ -103,7 +103,7 @@ async function main() {
         isInteractive ? async (checklist: Checklist): Promise<any> => {
           const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
           console.log("\n\nGOAL VALIDATION\n" + "=".repeat(40));
-          console.log(`The agent believes it has achieved the goal: "${checklist.isGoalAchieved}"`);
+          console.log(`The agent believes it has finished execution: "${checklist.finished}"`);
           console.log(`Current State: ${checklist.currentStateDescription}`);
           const answer = await rl.question("\n[V]alidate completion, [P]rompt further, or [C]ancel? (v/p/c): ");
           if (answer.toLowerCase().startsWith('p')) {

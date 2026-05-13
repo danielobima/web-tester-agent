@@ -5,7 +5,7 @@ import type { ChecklistTask } from "../components/features/StatsSection";
 import { ExecutionStream } from "../components/features/ExecutionStream";
 import type { TestStep } from "../components/features/ExecutionStream";
 import { PlanApproval } from "../components/features/PlanApproval";
-import { GoalValidation } from "../components/features/GoalValidation";
+import { ExecutionCompletion } from "../components/features/GoalValidation";
 import {
   PauseOverlay,
   type ManualPauseResult,
@@ -23,7 +23,7 @@ export const Execution = () => {
   const [testResults, setTestResults] = useState<TestStep[]>([]);
   const [tasks, setTasks] = useState<ChecklistTask[]>([]);
   const [pendingPlan, setPendingPlan] = useState<any>(null);
-  const [pendingGoalValidation, setPendingGoalValidation] = useState<any>(null);
+  const [pendingCompletionValidation, setPendingCompletionValidation] = useState<any>(null);
   const [pendingPauseChecklist, setPendingPauseChecklist] = useState<any>(null);
   const [isPlanning, setIsPlanning] = useState(false);
   const [completedSuitePath, setCompletedSuitePath] = useState<string | null>(
@@ -55,8 +55,8 @@ export const Execution = () => {
       },
     );
 
-    const unsubGoalReached = window.electron.onGoalReached((checklist: any) => {
-      setPendingGoalValidation(checklist);
+    const unsubExecutionFinished = window.electron.onExecutionFinished((checklist: any) => {
+      setPendingCompletionValidation(checklist);
     });
 
     const unsubPlanning = window.electron.onPlanningState(
@@ -87,7 +87,7 @@ export const Execution = () => {
         setIsStopping(false);
         setIsManualPausing(false);
         setPendingPlan(null);
-        setPendingGoalValidation(null);
+        setPendingCompletionValidation(null);
         setPendingPauseChecklist(null);
         if (result.success && result.suitePath) {
           setCompletedSuitePath(result.suitePath);
@@ -114,7 +114,7 @@ export const Execution = () => {
       unsubStep();
       unsubChecklist();
       unsubPlanRequest();
-      unsubGoalReached();
+      unsubExecutionFinished();
       unsubComplete();
       unsubPlanning();
       unsubIssues();
@@ -134,7 +134,7 @@ export const Execution = () => {
   const handleStop = () => {
     setIsStopping(true);
     setPendingPlan(null);
-    setPendingGoalValidation(null);
+    setPendingCompletionValidation(null);
     setPendingPauseChecklist(null);
     window.electron.stopTest();
   };
@@ -149,12 +149,12 @@ export const Execution = () => {
     setPendingPauseChecklist(null);
   };
 
-  const handleGoalAction = (
+  const handleCompletionAction = (
     action: "validate" | "prompt" | "cancel",
     feedback?: string,
   ) => {
-    window.electron.sendGoalValidationResponse({ action, feedback });
-    setPendingGoalValidation(null);
+    window.electron.sendCompletionValidationResponse({ action, feedback });
+    setPendingCompletionValidation(null);
     if (action === "cancel") setIsGenerating(false);
   };
 
@@ -307,10 +307,10 @@ export const Execution = () => {
       {pendingPlan && (
         <PlanApproval checklist={pendingPlan} onApprove={handleApprovePlan} />
       )}
-      {pendingGoalValidation && (
-        <GoalValidation
-          checklist={pendingGoalValidation}
-          onAction={handleGoalAction}
+      {pendingCompletionValidation && (
+        <ExecutionCompletion
+          checklist={pendingCompletionValidation}
+          onAction={handleCompletionAction}
         />
       )}
       {pendingPauseChecklist && (

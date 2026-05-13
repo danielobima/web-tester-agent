@@ -582,10 +582,10 @@ export const ChecklistSchema = z.object({
     .string()
     .optional()
     .describe("The ID of the task that should be prioritized next"),
-  isGoalAchieved: z
+  finished: z
     .boolean()
     .describe(
-      "Termination flag indicating if the overall user goal is fulfilled",
+      "Termination flag indicating if the overall user execution is finished",
     ),
   screenshot: z
     .string()

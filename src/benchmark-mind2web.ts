@@ -78,7 +78,7 @@ async function runBenchmarkSample() {
     let checklist: Checklist = {
         currentStateDescription: "Starting Mind2Web benchmark",
         tasks: [],
-        isGoalAchieved: false,
+        finished: false,
         issues: [],
     };
 

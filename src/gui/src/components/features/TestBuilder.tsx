@@ -3,17 +3,17 @@ import { useState } from "react";
 import { Icons } from "../ui/Icons";
 
 interface TestBuilderProps {
-  onGenerate: (url: string, prompt: string) => void;
+  onGenerate: (url: string, requirement: string) => void;
   isGenerating?: boolean;
 }
 
 export const TestBuilder = ({ onGenerate, isGenerating = false }: TestBuilderProps) => {
   const [url, setUrl] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [requirement, setRequirement] = useState("");
 
   const handleSubmit = () => {
-    if (url && prompt) {
-      onGenerate(url, prompt);
+    if (url && requirement) {
+      onGenerate(url, requirement);
     }
   };
 
@@ -40,14 +40,14 @@ export const TestBuilder = ({ onGenerate, isGenerating = false }: TestBuilderPro
           </div>
           <input 
             type="text" 
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            value={requirement}
+            onChange={(e) => setRequirement(e.target.value)}
             placeholder="Describe the user journey to test..."
             className="flex-1 bg-transparent py-4 text-lg outline-none placeholder:text-on-surface/30 font-medium"
           />
           <button 
             onClick={handleSubmit}
-            disabled={isGenerating || !url || !prompt}
+            disabled={isGenerating || !url || !requirement}
             className={`bg-primary text-white flex items-center gap-2 px-8 py-4 rounded-md font-bold transition-all hover:px-10 active:scale-95 text-lg ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {isGenerating ? "Generating..." : "Generate Script"} <Icons.ChevronRight />

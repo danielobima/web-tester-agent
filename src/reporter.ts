@@ -11,7 +11,7 @@ export async function generateMarkdownReport(test: SerializedTest, reportDir: st
 
   if (test.checklist) {
     md += `## Goal Verification Checklist\n\n`;
-    md += `**Status:** ${test.checklist.isGoalAchieved ? "✅ Goal Achieved" : "❌ Goal Not Fully Achieved"}\n\n`;
+    md += `**Status:** ${test.checklist.finished ? "✅ Execution Completed" : "❌ Execution Incomplete"}\n\n`;
     md += `### Tasks\n`;
     for (const task of test.checklist.tasks) {
       const statusIcon = task.status === "completed" ? "✅" : task.status === "failed" ? "❌" : "⏳";

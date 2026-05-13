@@ -7,7 +7,7 @@ interface Test {
   appId: string;
   name: string;
   url: string;
-  prompt: string;
+  requirement: string;
   model: string;
   createdAt: number;
   lastRunPath?: string;
@@ -31,7 +31,7 @@ export const ApplicationDetails = () => {
   
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
-  const [newPrompt, setNewPrompt] = useState("");
+  const [newRequirement, setNewRequirement] = useState("");
   const [newModel, setNewModel] = useState("");
 
   const loadData = async () => {
@@ -61,21 +61,21 @@ export const ApplicationDetails = () => {
 
   const handleCreateTest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newUrl.trim() || !newPrompt.trim()) return;
+    if (!newName.trim() || !newUrl.trim() || !newRequirement.trim()) return;
 
     try {
       const newTest = await window.electron.createTest({
         appId: appId!,
         name: newName,
         url: newUrl,
-        prompt: newPrompt,
+        requirement: newRequirement,
         model: newModel,
       });
       setTests([...tests, newTest]);
       setIsCreating(false);
       setNewName("");
       setNewUrl("");
-      setNewPrompt("");
+      setNewRequirement("");
       navigate(`/tests/${newTest.id}`);
     } catch (error) {
       console.error("Failed to create test:", error);
@@ -204,10 +204,10 @@ export const ApplicationDetails = () => {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Prompt / Goal</label>
+                <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Requirement / Instruction</label>
                 <textarea 
-                  value={newPrompt}
-                  onChange={e => setNewPrompt(e.target.value)}
+                  value={newRequirement}
+                  onChange={e => setNewRequirement(e.target.value)}
                   placeholder="Explain what the agent should achieve..."
                   rows={4}
                   className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium resize-none"
@@ -224,7 +224,7 @@ export const ApplicationDetails = () => {
                 </button>
                 <button 
                   type="submit"
-                  disabled={!newName.trim() || !newUrl.trim() || !newPrompt.trim()}
+                  disabled={!newName.trim() || !newUrl.trim() || !newRequirement.trim()}
                   className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-bold text-sm shadow-premium hover:opacity-90 transition-all disabled:opacity-50"
                 >
                   Create Test
