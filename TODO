@@ -43,9 +43,9 @@
 ☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
 ☐ Scroll interaction - Only relevant for vision models - needs testing
 ☐ Implement retry for the planning agent
-☐ We dont have a screenshot of the final state in the report, only the state before the final step
+✔ We dont have a screenshot of the final state in the report, only the screenshot of the state before the final step @done(26-05-13 12:58)
 ☐ When testing negative cases "EG verify something is not..." the agent get lazy 
-☐ Telling the user that the goal was acheived is a bit misleading if there were issues found, maybe we just say execution completed or something similar
+✔ Telling the user that the goal was acheived is a bit misleading if there were issues found, maybe we just say execution completed or something similar @done(26-05-13 12:55)
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
 ☐ Enable export markdown to pdf

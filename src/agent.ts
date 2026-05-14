@@ -417,6 +417,7 @@ export async function runAgent(
                 description: i.description,
                 severity: i.severity,
               })) || [];
+            serializer.updateChecklist(checklist);
           }
           console.log(`[Agent] Goal achieved. Requesting human validation...`);
           const validationResult = await onGoalReached(checklist);

@@ -3,34 +3,52 @@ import * as path from "path";
 import { SerializedTest, TestStep } from "./recorder";
 import { Action } from "./actions";
 
-export async function generateMarkdownReport(test: SerializedTest, reportDir: string, reportFileName: string) {
+export async function generateMarkdownReport(
+  test: SerializedTest,
+  reportDir: string,
+  reportFileName: string,
+) {
   let md = `# Test Suite Report: ${test.name}\n\n`;
   md += `**Date:** ${new Date().toLocaleString()}\n`;
   md += `**Start URL:** [${test.startUrl}](${test.startUrl})\n`;
   md += `**Steps Count:** ${test.steps.length}\n\n`;
 
   if (test.checklist) {
-    md += `## Goal Verification Checklist\n\n`;
+    md += `## Checklist\n\n`;
     md += `**Status:** ${test.checklist.finished ? "✅ Execution Completed" : "❌ Execution Incomplete"}\n\n`;
     md += `### Tasks\n`;
     for (const task of test.checklist.tasks) {
-      const statusIcon = task.status === "completed" ? "✅" : task.status === "failed" ? "❌" : "⏳";
+      const statusIcon =
+        task.status === "completed"
+          ? "✅"
+          : task.status === "failed"
+            ? "❌"
+            : "⏳";
       md += `- ${statusIcon} **${task.id}:** ${task.description}\n`;
       if (task.result) {
         md += `  - *Result:* ${task.result}\n`;
       }
     }
     md += `\n`;
+
+    if (test.checklist.screenshot) {
+      const screenshotsDirName = `${reportFileName.replace(".report.md", "")}.screenshots`;
+      const fileName = path.basename(
+        test.checklist.screenshot.replace("media://", ""),
+      );
+      md += `### Final State\n\n`;
+      md += `![Final State Screenshot](./${screenshotsDirName}/${fileName})\n\n`;
+    }
   }
 
   if (test.issues && test.issues.length > 0) {
     md += `## Identified Findings\n\n`;
-    
+
     const severityMap: Record<string, any[]> = {
       critical: [],
       high: [],
       medium: [],
-      low: []
+      low: [],
     };
 
     for (const issue of test.issues) {
@@ -54,7 +72,7 @@ export async function generateMarkdownReport(test: SerializedTest, reportDir: st
   for (let i = 0; i < test.steps.length; i++) {
     const step = test.steps[i];
     md += `### Step ${i + 1}: ${step.actionIntent || step.action.kind}\n\n`;
-    
+
     if (step.stateDescription) {
       md += `**Observation:** ${step.stateDescription}\n\n`;
     }
@@ -70,14 +88,16 @@ export async function generateMarkdownReport(test: SerializedTest, reportDir: st
       // We want to link to it relatively in the report.
       // Since the serializer moves them to suite-name.screenshots/
       const screenshotsDirName = `${reportFileName.replace(".report.md", "")}.screenshots`;
-      const fileName = path.basename(step.stateSnapshot.replace("media://", ""));
+      const fileName = path.basename(
+        step.stateSnapshot.replace("media://", ""),
+      );
       md += `![Step ${i + 1} Screenshot](./${screenshotsDirName}/${fileName})\n\n`;
     }
 
     if (step.verificationAssertions && step.verificationAssertions.length > 0) {
       md += `#### Verifications\n`;
       for (const assertion of step.verificationAssertions) {
-        md += `- ${assertion.type}${assertion.name ? ` on '${assertion.name}'` : ''}${assertion.value ? ` (expected: ${assertion.value})` : ''}\n`;
+        md += `- ${assertion.type}${assertion.name ? ` on '${assertion.name}'` : ""}${assertion.value ? ` (expected: ${assertion.value})` : ""}\n`;
       }
       md += `\n`;
     }
@@ -93,9 +113,9 @@ export async function generateMarkdownReport(test: SerializedTest, reportDir: st
 function formatAction(action: Action): string {
   switch (action.kind) {
     case "click":
-      return `Click on ${action.name || action.role || action.ref || 'element'}`;
+      return `Click on ${action.name || action.role || action.ref || "element"}`;
     case "type":
-      return `Type "${action.text || action.value}" into ${action.name || action.role || action.ref || 'field'}`;
+      return `Type "${action.text || action.value}" into ${action.name || action.role || action.ref || "field"}`;
     case "navigate":
       return `Navigate to ${action.url}`;
     case "screenshot":
@@ -103,13 +123,13 @@ function formatAction(action: Action): string {
     case "press":
       return `Press key: ${action.key}`;
     case "hover":
-      return `Hover over ${action.name || action.role || action.ref || 'element'}`;
+      return `Hover over ${action.name || action.role || action.ref || "element"}`;
     case "scrollIntoView":
-      return `Scroll to ${action.name || action.role || action.ref || 'element'}`;
+      return `Scroll to ${action.name || action.role || action.ref || "element"}`;
     case "wait":
-      return `Wait for ${action.timeMs ? action.timeMs + 'ms' : action.text || action.selector || 'condition'}`;
+      return `Wait for ${action.timeMs ? action.timeMs + "ms" : action.text || action.selector || "condition"}`;
     case "select_option":
-      return `Select option "${action.value}" from ${action.name || action.role || action.ref || 'dropdown'}`;
+      return `Select option "${action.value}" from ${action.name || action.role || action.ref || "dropdown"}`;
     case "drag":
       return `Drag from ${action.startName || action.startRef} to ${action.endName || action.endRef}`;
     case "evaluate":
