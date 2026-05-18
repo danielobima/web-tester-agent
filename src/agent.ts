@@ -6,18 +6,18 @@ import { BrowserManager } from "./browser";
  */
 export type AgentHistoryMessage =
   | {
-      role: "user";
-      content:
-        | string
-        | Array<
-            | { type: "text"; text: string }
-            | { type: "image"; image: Buffer | string }
-          >;
-    }
+    role: "user";
+    content:
+    | string
+    | Array<
+      | { type: "text"; text: string }
+      | { type: "image"; image: Buffer | string }
+    >;
+  }
   | {
-      role: "assistant";
-      content: string | Array<{ type: "text"; text: string }>;
-    }
+    role: "assistant";
+    content: string | Array<{ type: "text"; text: string }>;
+  }
   | { role: "system"; content: string };
 import {
   ChecklistSchema,
@@ -32,7 +32,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { z } from "zod";
 import { evaluateAssertions } from "./replay";
-import { saveAgentErrorReport } from "./error_logger";
+import { saveAgentErrorReport, type TokenBreakdown } from "./error_logger";
 
 export type PlanApprovalResult =
   | { action: "accept" }
@@ -163,9 +163,9 @@ export async function executeTask(params: {
   const knownIssuesText =
     params.serializer && params.serializer.getTest()?.issues.length
       ? `\n\nPreviously Identified Issues:\n${params.serializer
-          .getTest()
-          ?.issues.map((i) => `- ${i.id} (${i.severity}): ${i.description}`)
-          .join("\n")}`
+        .getTest()
+        ?.issues.map((i) => `- ${i.id} (${i.severity}): ${i.description}`)
+        .join("\n")}`
       : "";
 
   const executionPrompt =
@@ -230,6 +230,9 @@ export async function runAgent(
 
   if (artifactsDir) {
     await fs.mkdir(artifactsDir, { recursive: true });
+  }
+  if (screenshotsDir) {
+    await fs.mkdir(screenshotsDir, { recursive: true });
   }
 
   const planningPrompt = await fs.readFile(
@@ -313,43 +316,89 @@ export async function runAgent(
 
       const planningStartTime = Date.now();
       if (onPlanning) onPlanning(true);
-      try {
-        checklist = await planTask({
-          model,
-          requirement,
-          checklist,
-          snapshot,
-          history,
-          planningPrompt,
-          screenshot,
-          supportsVision,
-        });
-      } catch (e: any) {
-        if (onPlanning) onPlanning(false);
-        const rawResponse = e.text || e.cause?.text || e.response?.text;
-        console.log(`[Agent][Planner] Raw response:`, rawResponse);
 
-        if (artifactsDir) {
-          await saveAgentErrorReport(
-            artifactsDir,
-            {
-              error: e,
-              type: "planning",
-              step: stepCounter,
-              requirement,
-              url: currentUrl,
-              history: [...history],
-              snapshot,
-              axTree,
-              refs,
-              checklist,
-              llmPrompt: planningPrompt,
-              llmRawResponse: rawResponse,
-            },
-            browser,
-          );
+      let planRetries = 0;
+      const maxPlanRetries = 3;
+      while (planRetries < maxPlanRetries) {
+        try {
+          checklist = await planTask({
+            model,
+            requirement,
+            checklist,
+            snapshot,
+            history,
+            planningPrompt,
+            screenshot,
+            supportsVision,
+          });
+          break;
+        } catch (e: any) {
+          planRetries++;
+          let errorMessage = e.message;
+          const details = extractSchemaErrors(e);
+          if (details) {
+            errorMessage = `Schema validation failed:\n${details}`;
+          }
+
+
+          const rawResponse = e.text || e.cause?.text || e.response?.text;
+          console.log(`[Agent][Planner] Raw response:`, rawResponse);
+
+          history.push({
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: rawResponse || JSON.stringify({ error: errorMessage }),
+              },
+            ],
+          });
+          history.push({
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease correct your output based on the ChecklistSchema.`,
+              },
+            ],
+          });
+
+          if (planRetries >= maxPlanRetries) {
+            if (onPlanning) onPlanning(false);
+            const latestUserText = `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`;
+            const tokenBreakdown = getTokenBreakdown({
+              systemPrompt: planningPrompt,
+              history,
+              latestUserText,
+              screenshot,
+              supportsVision,
+            });
+            console.error(`[Agent][Planner] Error occurred. Input token size breakdown:`, tokenBreakdown);
+
+            if (artifactsDir) {
+              await saveAgentErrorReport(
+                artifactsDir,
+                {
+                  error: e,
+                  type: "planning",
+                  step: stepCounter,
+                  requirement,
+                  url: currentUrl,
+                  history: [...history],
+                  snapshot,
+                  axTree,
+                  refs,
+                  checklist,
+                  llmPrompt: planningPrompt,
+                  llmRawResponse: rawResponse,
+                  tokenBreakdown,
+                },
+                browser,
+              );
+            }
+            throw e;
+          }
         }
-        throw e;
       }
 
       console.log("[Agent][Planner] Planning result:", checklist);
@@ -406,19 +455,21 @@ export async function runAgent(
       }
 
       if (checklist.finished) {
+        if (screenshotPath && !checklist.screenshot) {
+          checklist.screenshot = screenshotPath;
+        }
+        if (serializer) {
+          checklist.issues =
+            serializer.getTest()?.issues.map((i) => ({
+              id: i.id,
+              description: i.description,
+              severity: i.severity,
+            })) || [];
+          serializer.updateChecklist(checklist);
+          await serializer.saveTest();
+        }
+
         if (onGoalReached) {
-          if (screenshot && screenshotsDir) {
-            checklist.screenshot = screenshotPath;
-          }
-          if (serializer) {
-            checklist.issues =
-              serializer.getTest()?.issues.map((i) => ({
-                id: i.id,
-                description: i.description,
-                severity: i.severity,
-              })) || [];
-            serializer.updateChecklist(checklist);
-          }
           console.log(`[Agent] Goal achieved. Requesting human validation...`);
           const validationResult = await onGoalReached(checklist);
           if (validationResult.action === "validate") break;
@@ -484,9 +535,9 @@ export async function runAgent(
       const knownIssuesText =
         serializer && serializer.getTest()?.issues.length
           ? `\n\nPreviously Identified Issues:\n${serializer
-              .getTest()
-              ?.issues.map((i) => `- ${i.id} (${i.severity}): ${i.description}`)
-              .join("\n")}`
+            .getTest()
+            ?.issues.map((i) => `- ${i.id} (${i.severity}): ${i.description}`)
+            .join("\n")}`
           : "";
 
       const consoleLogs = browser.consoleLogs
@@ -539,18 +590,8 @@ export async function runAgent(
         } catch (e: any) {
           retries++;
           let errorMessage = e.message;
-          if (e.errors && Array.isArray(e.errors)) {
-            const details = e.errors
-              .map((err: any) => `- ${err.path.join(".")}: ${err.message}`)
-              .join("\n");
-            errorMessage = `Schema validation failed:\n${details}`;
-          } else if (
-            errorMessage.includes("No object generated") &&
-            e.cause?.errors
-          ) {
-            const details = (e.cause.errors as any[])
-              .map((err: any) => `- ${err.path.join(".")}: ${err.message}`)
-              .join("\n");
+          const details = extractSchemaErrors(e);
+          if (details) {
             errorMessage = `Schema validation failed:\n${details}`;
           }
 
@@ -576,6 +617,22 @@ export async function runAgent(
           });
 
           if (retries >= maxRetries) {
+            const currentIssues =
+              serializer?.getTest()?.issues || checklist.issues || [];
+            const issuesSummary = currentIssues
+              .map((i) => `${i.id}: ${i.description}`)
+              .join("; ");
+            const latestUserText = `Goal: ${requirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction && consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`;
+
+            const tokenBreakdown = getTokenBreakdown({
+              systemPrompt: executionPrompt,
+              history,
+              latestUserText,
+              screenshot,
+              supportsVision,
+            });
+            console.error(`[Agent][Executor] Error occurred. Input token size breakdown:`, tokenBreakdown);
+
             if (artifactsDir) {
               await saveAgentErrorReport(
                 artifactsDir,
@@ -594,6 +651,7 @@ export async function runAgent(
                   checklist,
                   llmPrompt: executionPrompt,
                   llmRawResponse: e.text,
+                  tokenBreakdown,
                 },
                 browser,
               );
@@ -678,6 +736,22 @@ export async function runAgent(
         } catch (e: any) {
           console.error(`[Agent] Action failed: ${e.message}`);
 
+          const currentIssues =
+            serializer?.getTest()?.issues || checklist.issues || [];
+          const issuesSummary = currentIssues
+            .map((i) => `${i.id}: ${i.description}`)
+            .join("; ");
+          const latestUserText = `Goal: ${requirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction && consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`;
+
+          const tokenBreakdown = getTokenBreakdown({
+            systemPrompt: executionPrompt,
+            history,
+            latestUserText,
+            screenshot,
+            supportsVision,
+          });
+          console.error(`[Agent][Browser] Action failed. Input token size breakdown:`, tokenBreakdown);
+
           if (artifactsDir) {
             await saveAgentErrorReport(
               artifactsDir,
@@ -694,6 +768,7 @@ export async function runAgent(
                 axTree,
                 refs,
                 checklist,
+                tokenBreakdown,
               },
               browser,
             );
@@ -773,19 +848,19 @@ export async function runAgent(
                     },
                     ...(currentTaskBeforeScreenshot && supportsVision
                       ? [
-                          {
-                            type: "image" as const,
-                            image: currentTaskBeforeScreenshot,
-                          },
-                        ]
+                        {
+                          type: "image" as const,
+                          image: currentTaskBeforeScreenshot,
+                        },
+                      ]
                       : []),
                     ...(afterActionScreenshot && supportsVision
                       ? [
-                          {
-                            type: "image" as const,
-                            image: afterActionScreenshot,
-                          },
-                        ]
+                        {
+                          type: "image" as const,
+                          image: afterActionScreenshot,
+                        },
+                      ]
                       : []),
                   ],
                 },
@@ -833,8 +908,55 @@ export async function runAgent(
             break;
           } catch (e: any) {
             assertionRetries++;
+            let errorMessage = e.message;
+            const details = extractSchemaErrors(e);
+            if (details) {
+              errorMessage = `Schema validation failed:\n${details}`;
+            }
             const rawResponse = e.text || e.cause?.text || e.response?.text;
             console.log(`[Agent][Asserter] Raw response:`, rawResponse);
+
+            const currentIssues =
+              serializer?.getTest()?.issues || checklist.issues || [];
+            const issuesSummary = currentIssues
+              .map((i) => `${i.id}: ${i.description}`)
+              .join("; ");
+            const latestUserText = `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`;
+
+            const systemPromptTokens = estimateTextTokens(assertionPromptTemplate);
+            const historyTokens = assertionHistory.reduce((sum: number, msg: any) => {
+              if (typeof msg.content === "string") {
+                return sum + estimateTextTokens(msg.content);
+              } else if (Array.isArray(msg.content)) {
+                return sum + msg.content.reduce((innerSum: number, part: any) => {
+                  if (part.type === "text") {
+                    return innerSum + estimateTextTokens(part.text);
+                  } else if (part.type === "image") {
+                    return innerSum + estimateImageTokens(part.image);
+                  }
+                  return innerSum;
+                }, 0);
+              }
+              return sum;
+            }, 0);
+
+            const latestUserTextTokens = estimateTextTokens(latestUserText);
+
+            let imageTokens = 0;
+            if (currentTaskBeforeScreenshot && supportsVision) imageTokens += estimateImageTokens(currentTaskBeforeScreenshot);
+            if (afterActionScreenshot && supportsVision) imageTokens += estimateImageTokens(afterActionScreenshot);
+
+            const totalTokens = systemPromptTokens + historyTokens + latestUserTextTokens + imageTokens;
+
+            const tokenBreakdown = {
+              systemPromptTokens,
+              historyTokens,
+              latestUserTextTokens,
+              imageTokens,
+              totalTokens,
+            };
+
+            console.error(`[Agent][Asserter] Error occurred. Input token size breakdown:`, tokenBreakdown);
 
             if (assertionRetries >= 3 && artifactsDir) {
               await saveAgentErrorReport(
@@ -853,6 +975,7 @@ export async function runAgent(
                   checklist,
                   llmPrompt: assertionPromptTemplate,
                   llmRawResponse: e.text,
+                  tokenBreakdown,
                 },
                 browser,
               );
@@ -863,7 +986,7 @@ export async function runAgent(
               content: [
                 {
                   type: "text",
-                  text: `Your previous response failed schema validation: ${e.message}. Please corrective-output a valid object.`,
+                  text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease corrective-output a valid object.`,
                 },
               ],
             });
@@ -970,4 +1093,106 @@ async function saveStepArtifacts(
     await browser.page.screenshot({
       path: path.join(dir, `step-${step}-screenshot.png`),
     });
+}
+
+/**
+ * Estimates the number of tokens in a text string.
+ * Based on the standard baseline of ~4 characters per token.
+ */
+export function estimateTextTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Estimates the number of tokens for an image (screenshot).
+ * For vision models, standard high-resolution browser screenshots usually cost around 1000-1600 tokens.
+ * We use 1100 tokens as a robust default estimate (matching GPT-4V high-detail tile cost).
+ */
+export function estimateImageTokens(image: any): number {
+  return 1100;
+}
+
+/**
+ * Calculates the estimated token size breakdown for an LLM invocation.
+ */
+export function getTokenBreakdown(params: {
+  systemPrompt: string;
+  history: AgentHistoryMessage[];
+  latestUserText: string;
+  screenshot?: Buffer | string;
+  supportsVision?: boolean;
+}): TokenBreakdown {
+  const systemPromptTokens = estimateTextTokens(params.systemPrompt);
+
+  const historyTokens = params.history.reduce((sum: number, msg) => {
+    if (typeof msg.content === "string") {
+      return sum + estimateTextTokens(msg.content);
+    } else if (Array.isArray(msg.content)) {
+      return sum + msg.content.reduce((innerSum: number, part: any) => {
+        if (part.type === "text") {
+          return innerSum + estimateTextTokens(part.text);
+        } else if (part.type === "image") {
+          return innerSum + estimateImageTokens(part.image);
+        }
+        return innerSum;
+      }, 0);
+    }
+    return sum;
+  }, 0);
+
+  const latestUserTextTokens = estimateTextTokens(params.latestUserText);
+  const imageTokens = (params.screenshot && params.supportsVision) ? estimateImageTokens(params.screenshot) : 0;
+  const totalTokens = systemPromptTokens + historyTokens + latestUserTextTokens + imageTokens;
+
+  return {
+    systemPromptTokens,
+    historyTokens,
+    latestUserTextTokens,
+    imageTokens,
+    totalTokens,
+  };
+}
+
+export function extractSchemaErrors(e: any): string | null {
+  if (!e) return null;
+
+  const formatZodIssues = (issues: any[]): string => {
+    return issues
+      .map((err: any) => {
+        const pathStr = Array.isArray(err?.path) ? err.path.join(".") : "unknown";
+        const messageStr = err?.message || "Invalid value";
+        return `- ${pathStr}: ${messageStr}`;
+      })
+      .join("\n");
+  };
+
+  if (e.errors && Array.isArray(e.errors)) {
+    return formatZodIssues(e.errors);
+  }
+
+  if (e.cause?.errors && Array.isArray(e.cause.errors)) {
+    return formatZodIssues(e.cause.errors);
+  }
+
+  const causeCause = e.cause?.cause;
+  if (causeCause) {
+    if (Array.isArray(causeCause)) {
+      return formatZodIssues(causeCause);
+    }
+    if (causeCause.errors && Array.isArray(causeCause.errors)) {
+      return formatZodIssues(causeCause.errors);
+    }
+    if (causeCause.issues && Array.isArray(causeCause.issues)) {
+      return formatZodIssues(causeCause.issues);
+    }
+  }
+
+  const cause = e.cause;
+  if (cause) {
+    if (cause.issues && Array.isArray(cause.issues)) {
+      return formatZodIssues(cause.issues);
+    }
+  }
+
+  return null;
 }

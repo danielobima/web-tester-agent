@@ -4,6 +4,14 @@ import { BrowserManager } from "./browser";
 import { AgentHistoryMessage } from "./agent";
 import { Checklist } from "./actions";
 
+export interface TokenBreakdown {
+  systemPromptTokens: number;
+  historyTokens: number;
+  latestUserTextTokens: number;
+  imageTokens: number;
+  totalTokens: number;
+}
+
 export interface ErrorReportContext {
   error: Error;
   type: "planning" | "execution" | "verification" | "browser";
@@ -19,6 +27,7 @@ export interface ErrorReportContext {
   checklist?: Checklist;
   llmPrompt?: string;
   llmRawResponse?: string;
+  tokenBreakdown?: TokenBreakdown;
 }
 
 export async function saveAgentErrorReport(
@@ -53,6 +62,7 @@ export async function saveAgentErrorReport(
     llm: {
       prompt: ctx.llmPrompt,
       rawResponse: ctx.llmRawResponse,
+      tokenBreakdown: ctx.tokenBreakdown,
     },
     history: ctx.history,
   };

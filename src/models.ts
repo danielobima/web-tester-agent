@@ -10,7 +10,8 @@ export function createModel(config: ModelConfig): LanguageModel {
       return google(config.modelName);
     case "openai":
       const openai = createOpenAI({
-        apiKey: config.apiKey,
+        apiKey: config.apiKey || "sk-local-dummy",
+        baseURL: config.baseUrl || "https://api.openai.com/v1",
       });
       return openai(config.modelName);
     case "ollama":

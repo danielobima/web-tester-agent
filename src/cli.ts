@@ -118,15 +118,23 @@ async function main() {
           rl.close();
           return { action: 'validate' };
         } : undefined,
-        undefined,
-        undefined,
-        undefined,
+        undefined, // 12. onPlanning
+        undefined, // 13. onManualPause
+        path.join(resultsDir, `${path.basename(outPath, ".json")}.screenshots`), // 14. screenshotsDir
         undefined,
         undefined,
         supportsVision,
       );
 
       await serializer.saveTest(finalOutPath);
+      
+      // Generate report
+      const testData = serializer.getTest();
+      if (testData) {
+        const { generateMarkdownReport } = await import("./reporter");
+        const reportFileName = path.basename(finalOutPath).replace(".json", ".report.md");
+        await generateMarkdownReport(testData, path.dirname(finalOutPath), reportFileName);
+      }
     } else if (command === "replay") {
       const file = args.find(a => !a.startsWith("-") && a !== "replay");
       if (!file) throw new Error("Missing file path for replay.");

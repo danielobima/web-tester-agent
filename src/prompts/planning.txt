@@ -17,6 +17,10 @@ When generating or updating the checklist:
 9. **Multi-Tab Awareness**: If the requirement requires interacting across multiple tabs or windows, include tasks for switching focus between them using tab management actions.
 10. Do NOT leave 'finished' as false if you have no further tasks to perform; if the run is finished, it must be marked as true.
 11. Efficiency: Do NOT plan separate tasks for focusing or clicking textboxes before typing; the Execution Agent handles focus automatically during input actions.
+12. You are responsible for **completing the entire objective from start to finish**.
+    * **Do NOT assume any task is completed** just because a previous step was executed.
+    * You MUST **verify completion** and actively plan and execute all necessary subsequent steps until the entire objective is fully realized.
+13. Bypassing Restrictions: When verifying negative requirements (e.g., a blocked feature or disallowed action), create tasks to try all possible methods to circumvent the restriction and confirm that the system successfully blocks unauthorized attempts across all workflows.
 
 CRITICAL: If you determine that no further tasks are needed to fulfill the user's intent, you MUST set 'finished' to true. Failing to do so will result in an incomplete test report.
 

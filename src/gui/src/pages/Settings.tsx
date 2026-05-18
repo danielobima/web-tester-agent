@@ -13,6 +13,9 @@ interface ModelConfig {
 interface AppConfig {
   models: ModelConfig[];
   defaultModelId?: string;
+  requirePlanApproval?: boolean;
+  headless?: boolean;
+  enableVision?: boolean;
 }
 
 export const Settings = () => {
@@ -275,7 +278,7 @@ export const Settings = () => {
                 />
               </div>
 
-              {newModel.provider === 'ollama' ? (
+              {newModel.provider === 'ollama' && (
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Base URL</label>
                   <input 
@@ -285,17 +288,30 @@ export const Settings = () => {
                     className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm"
                   />
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">API Key</label>
-                  <input 
-                    type="password"
-                    value={newModel.apiKey}
-                    onChange={e => setNewModel({...newModel, apiKey: e.target.value})}
-                    placeholder="sk-..."
-                    className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm"
-                  />
-                </div>
+              )}
+
+              {newModel.provider === 'openai' && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Base URL (Optional, for Local Servers like vLLM)</label>
+                    <input 
+                      value={newModel.baseUrl}
+                      onChange={e => setNewModel({...newModel, baseUrl: e.target.value})}
+                      placeholder="http://localhost:8000/v1"
+                      className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">API Key</label>
+                    <input 
+                      type="password"
+                      value={newModel.apiKey}
+                      onChange={e => setNewModel({...newModel, apiKey: e.target.value})}
+                      placeholder="sk-..."
+                      className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm"
+                    />
+                  </div>
+                </>
               )}
 
               <div className="flex gap-4 pt-4">
