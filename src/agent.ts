@@ -1,202 +1,60 @@
 import { generateObject, type LanguageModel } from "ai";
 import { BrowserManager } from "./browser";
-
-/**
- * Concrete type for agent conversation history
- */
-export type AgentHistoryMessage =
-  | {
-    role: "user";
-    content:
-    | string
-    | Array<
-      | { type: "text"; text: string }
-      | { type: "image"; image: Buffer | string }
-    >;
-  }
-  | {
-    role: "assistant";
-    content: string | Array<{ type: "text"; text: string }>;
-  }
-  | { role: "system"; content: string };
-import {
-  ChecklistSchema,
-  ExecutionResponseSchema,
-  AssertionAgentResponseSchema,
-  type Checklist,
-  type ExecutionResponse,
-  type AssertionAgentResponse,
-} from "./actions";
 import { TestSerializer } from "./recorder";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { z } from "zod";
 import { evaluateAssertions } from "./replay";
-import { saveAgentErrorReport, type TokenBreakdown } from "./error_logger";
+import { saveAgentErrorReport } from "./error_logger";
+import { prepareImagePart } from "./utils";
 
-export type PlanApprovalResult =
-  | { action: "accept" }
-  | { action: "modify"; checklist: Checklist }
-  | { action: "reject" };
+import {
+  AgentHistoryMessage,
+  PlanApprovalResult,
+  GoalReachedResult,
+  ManualPauseResult,
+  AgentStepUpdate,
+} from "./agent/types";
 
-export type GoalReachedResult =
-  | { action: "validate" }
-  | { action: "prompt"; feedback: string }
-  | { action: "cancel" };
+import {
+  mapRefsToIdentifiers,
+  saveStepArtifacts,
+  estimateTextTokens,
+  estimateImageTokens,
+  getTokenBreakdown,
+  extractSchemaErrors,
+} from "./agent/utils";
 
-export type ManualPauseResult =
-  | { action: "resume" }
-  | { action: "reprompt"; feedback: string }
-  | { action: "modify"; checklist: Checklist };
+import { planTask } from "./agent/planner";
+import { executeTask } from "./agent/executor";
 
-export function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
-  if (!obj) return;
-  const map = (target: any) => {
-    if (target && target.ref && refs[target.ref]) {
-      const refData = refs[target.ref];
-      target.role = refData.role;
-      if (refData.name) target.name = refData.name;
-      if (refData.nth !== undefined) target.nth = refData.nth;
-      if (target.kind === "screenshot") {
-        target.elementName = target.name;
-        delete target.name;
-      }
-      delete target.ref;
-    }
-  };
-  map(obj);
-  if (obj.kind === "drag") {
-    if (obj.startRef) {
-      const startRefData = refs[obj.startRef];
-      if (startRefData) {
-        obj.startRole = startRefData.role;
-        if (startRefData.name) obj.startName = startRefData.name;
-        if (startRefData.nth !== undefined) obj.startNth = startRefData.nth;
-      }
-      delete obj.startRef;
-    }
-    if (obj.endRef) {
-      const endRefData = refs[obj.endRef];
-      if (endRefData) {
-        obj.endRole = endRefData.role;
-        if (endRefData.name) obj.endName = endRefData.name;
-        if (endRefData.nth !== undefined) obj.endNth = endRefData.nth;
-      }
-      delete obj.endRef;
-    }
-  }
-  if (obj.kind === "fill" && Array.isArray(obj.fields)) {
-    for (const field of obj.fields) map(field);
-  }
-  if (Array.isArray(obj.assertions)) {
-    for (const assertion of obj.assertions) map(assertion);
-  }
-}
+import {
+  Checklist,
+  ExecutionResponse,
+  AssertionAgentResponse,
+  AssertionAgentResponseSchema,
+} from "./actions";
 
-export interface AgentStepUpdate {
-  id: string;
-  step: string;
-  status: "success" | "failed" | "pending";
-  duration: string;
-  description: string;
-  stateDescription?: string;
-  error?: string;
-  screenshot?: string;
-  action?: any;
-  issues?: { description: string; severity: string }[];
-  url?: string;
-}
+// Re-export for compatibility with other files (benchmark-mind2web.ts, cli.ts, etc.)
+export {
+  AgentHistoryMessage,
+  PlanApprovalResult,
+  GoalReachedResult,
+  ManualPauseResult,
+  AgentStepUpdate,
+} from "./agent/types";
 
-export async function planTask(params: {
-  model: LanguageModel;
-  requirement: string;
-  checklist: Checklist;
-  snapshot: string;
-  history: AgentHistoryMessage[];
-  planningPrompt: string;
-  screenshot?: Buffer;
-  supportsVision?: boolean;
-}): Promise<Checklist> {
-  console.log(`[Agent][Planner] Planning...`);
-  const planningResult = await generateObject({
-    model: params.model,
-    schema: ChecklistSchema,
-    system: params.planningPrompt,
-    messages: [
-      ...params.history,
-      {
-        role: "user",
-        content: [
-          {
-            type: "text" as const,
-            text: `Goal: ${params.requirement}\n\nChecklist: ${JSON.stringify(params.checklist, null, 2)}\n\nCurrent State:\n${params.snapshot}`,
-          },
-          ...(params.screenshot && params.supportsVision
-            ? [{ type: "image" as const, image: params.screenshot }]
-            : []),
-        ],
-      },
-    ],
-  });
-  return planningResult.object;
-}
+export {
+  mapRefsToIdentifiers,
+  saveStepArtifacts,
+  estimateTextTokens,
+  estimateImageTokens,
+  getTokenBreakdown,
+  extractSchemaErrors,
+} from "./agent/utils";
 
-export async function executeTask(params: {
-  model: LanguageModel;
-  requirement: string;
-  currentTask: { description: string };
-  checklist: Checklist;
-  snapshot: string;
-  history: AgentHistoryMessage[];
-  executionPromptTemplate: string;
-  screenshot?: Buffer;
-  supportsVision?: boolean;
-  consecutiveSameAction?: number;
-  serializer?: TestSerializer;
-}): Promise<ExecutionResponse> {
-  const currentIssues =
-    params.serializer?.getTest()?.issues || params.checklist.issues || [];
-  const issuesSummary = currentIssues
-    .map((i) => `${i.id}: ${i.description}`)
-    .join("; ");
-
-  const knownIssuesText =
-    params.serializer && params.serializer.getTest()?.issues.length
-      ? `\n\nPreviously Identified Issues:\n${params.serializer
-        .getTest()
-        ?.issues.map((i) => `- ${i.id} (${i.severity}): ${i.description}`)
-        .join("\n")}`
-      : "";
-
-  const executionPrompt =
-    params.executionPromptTemplate
-      .replace("{taskDescription}", params.currentTask.description)
-      .replace("{overallGoal}", params.requirement) + knownIssuesText;
-
-  console.log("[Agent][Executor] Beginning execution prompt");
-
-  const result = await generateObject({
-    model: params.model,
-    schema: ExecutionResponseSchema,
-    system: executionPrompt,
-    messages: [
-      ...params.history,
-      {
-        role: "user",
-        content: [
-          {
-            type: "text" as const,
-            text: `Goal: ${params.requirement}\nTask: ${params.currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${params.snapshot}${params.consecutiveSameAction && params.consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`,
-          },
-          ...(params.screenshot && params.supportsVision
-            ? [{ type: "image" as const, image: params.screenshot }]
-            : []),
-        ],
-      },
-    ],
-  });
-  return result.object;
-}
+export { planTask } from "./agent/planner";
+export { executeTask } from "./agent/executor";
 
 export async function runAgent(
   requirement: string,
@@ -847,20 +705,10 @@ export async function runAgent(
                       text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`,
                     },
                     ...(currentTaskBeforeScreenshot && supportsVision
-                      ? [
-                        {
-                          type: "image" as const,
-                          image: currentTaskBeforeScreenshot,
-                        },
-                      ]
+                      ? [prepareImagePart(currentTaskBeforeScreenshot)]
                       : []),
                     ...(afterActionScreenshot && supportsVision
-                      ? [
-                        {
-                          type: "image" as const,
-                          image: afterActionScreenshot,
-                        },
-                      ]
+                      ? [prepareImagePart(afterActionScreenshot)]
                       : []),
                   ],
                 },
@@ -869,7 +717,7 @@ export async function runAgent(
             });
             assertionResponse = assertionResult.object;
 
-            if (assertionResponse.assertions.length > 0) {
+            if (assertionResponse && assertionResponse.assertions && assertionResponse.assertions.length > 0) {
               for (const ass of assertionResponse.assertions)
                 mapRefsToIdentifiers(ass, afterRefs);
               console.log(
@@ -1061,138 +909,4 @@ export async function runAgent(
   }
 }
 
-async function saveStepArtifacts(
-  dir: string,
-  step: number,
-  snapshot: string,
-  axTree: any,
-  refs: any,
-  browser: BrowserManager,
-  history: any[],
-  checklist: Checklist,
-) {
-  await fs.writeFile(path.join(dir, `step-${step}-snapshot.txt`), snapshot);
-  if (axTree)
-    await fs.writeFile(
-      path.join(dir, `step-${step}-axtree.json`),
-      JSON.stringify(axTree, null, 2),
-    );
-  await fs.writeFile(
-    path.join(dir, `step-${step}-refs.json`),
-    JSON.stringify(refs, null, 2),
-  );
-  await fs.writeFile(
-    path.join(dir, `step-${step}-checklist.json`),
-    JSON.stringify(checklist, null, 2),
-  );
-  await fs.writeFile(
-    path.join(dir, `step-${step}-history.json`),
-    JSON.stringify(history, null, 2),
-  );
-  if (browser.page)
-    await browser.page.screenshot({
-      path: path.join(dir, `step-${step}-screenshot.png`),
-    });
-}
 
-/**
- * Estimates the number of tokens in a text string.
- * Based on the standard baseline of ~4 characters per token.
- */
-export function estimateTextTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
-
-/**
- * Estimates the number of tokens for an image (screenshot).
- * For vision models, standard high-resolution browser screenshots usually cost around 1000-1600 tokens.
- * We use 1100 tokens as a robust default estimate (matching GPT-4V high-detail tile cost).
- */
-export function estimateImageTokens(image: any): number {
-  return 1100;
-}
-
-/**
- * Calculates the estimated token size breakdown for an LLM invocation.
- */
-export function getTokenBreakdown(params: {
-  systemPrompt: string;
-  history: AgentHistoryMessage[];
-  latestUserText: string;
-  screenshot?: Buffer | string;
-  supportsVision?: boolean;
-}): TokenBreakdown {
-  const systemPromptTokens = estimateTextTokens(params.systemPrompt);
-
-  const historyTokens = params.history.reduce((sum: number, msg) => {
-    if (typeof msg.content === "string") {
-      return sum + estimateTextTokens(msg.content);
-    } else if (Array.isArray(msg.content)) {
-      return sum + msg.content.reduce((innerSum: number, part: any) => {
-        if (part.type === "text") {
-          return innerSum + estimateTextTokens(part.text);
-        } else if (part.type === "image") {
-          return innerSum + estimateImageTokens(part.image);
-        }
-        return innerSum;
-      }, 0);
-    }
-    return sum;
-  }, 0);
-
-  const latestUserTextTokens = estimateTextTokens(params.latestUserText);
-  const imageTokens = (params.screenshot && params.supportsVision) ? estimateImageTokens(params.screenshot) : 0;
-  const totalTokens = systemPromptTokens + historyTokens + latestUserTextTokens + imageTokens;
-
-  return {
-    systemPromptTokens,
-    historyTokens,
-    latestUserTextTokens,
-    imageTokens,
-    totalTokens,
-  };
-}
-
-export function extractSchemaErrors(e: any): string | null {
-  if (!e) return null;
-
-  const formatZodIssues = (issues: any[]): string => {
-    return issues
-      .map((err: any) => {
-        const pathStr = Array.isArray(err?.path) ? err.path.join(".") : "unknown";
-        const messageStr = err?.message || "Invalid value";
-        return `- ${pathStr}: ${messageStr}`;
-      })
-      .join("\n");
-  };
-
-  if (e.errors && Array.isArray(e.errors)) {
-    return formatZodIssues(e.errors);
-  }
-
-  if (e.cause?.errors && Array.isArray(e.cause.errors)) {
-    return formatZodIssues(e.cause.errors);
-  }
-
-  const causeCause = e.cause?.cause;
-  if (causeCause) {
-    if (Array.isArray(causeCause)) {
-      return formatZodIssues(causeCause);
-    }
-    if (causeCause.errors && Array.isArray(causeCause.errors)) {
-      return formatZodIssues(causeCause.errors);
-    }
-    if (causeCause.issues && Array.isArray(causeCause.issues)) {
-      return formatZodIssues(causeCause.issues);
-    }
-  }
-
-  const cause = e.cause;
-  if (cause) {
-    if (cause.issues && Array.isArray(cause.issues)) {
-      return formatZodIssues(cause.issues);
-    }
-  }
-
-  return null;
-}

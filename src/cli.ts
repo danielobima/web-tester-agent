@@ -1,5 +1,6 @@
 import { BrowserManager } from "./browser";
 import { runAgent, type PlanApprovalResult } from "./agent";
+import { runVisualAgent } from "./visual-agent";
 import { TestSerializer } from "./recorder";
 import { replayTest } from "./replay";
 import * as dotenv from "dotenv";
@@ -19,7 +20,7 @@ async function main() {
 
   if (!command) {
     console.log(`Usage: 
-    npm run dev -- record "<Goal>" "<StartUrl>" "<OutputFile.json>" [--no-artifacts] [--full-snapshot] [--interactive] [--vision]
+    npm run dev -- record "<Goal>" "<StartUrl>" "<OutputFile.json>" [--no-artifacts] [--full-snapshot] [--interactive] [--vision] [--visual-first]
     npm run dev -- replay "<File.json>" [--no-artifacts] [--full-snapshot] [--vision]`);
     process.exit(1);
   }
@@ -43,7 +44,7 @@ async function main() {
       model = google(modelName);
     }
     
-    const useVision = args.includes("--vision");
+    const useVision = args.includes("--vision") || args.includes("--visual-first");
     const supportsVision = useVision && isVisionModel(provider, modelName);
     console.log(`[CLI] Model: ${modelName} (Vision support: ${supportsVision}${useVision ? "" : " [DISABLED BY DEFAULT]"})`);
 
@@ -52,8 +53,9 @@ async function main() {
       const skipAssertions = args.includes("--skip-assertions");
       const fullSnapshot = args.includes("--full-snapshot");
       const isInteractive = args.includes("--interactive") || args.includes("-i");
+      const isVisualFirst = args.includes("--visual-first");
       
-      const cleanArgs = args.filter(a => !["--no-artifacts", "--skip-assertions", "--full-snapshot", "--interactive", "-i", "--vision"].includes(a) && !a.startsWith("--provider=") && !a.startsWith("--model="));
+      const cleanArgs = args.filter(a => !["--no-artifacts", "--skip-assertions", "--full-snapshot", "--interactive", "-i", "--vision", "--visual-first"].includes(a) && !a.startsWith("--provider=") && !a.startsWith("--model="));
 
       const goal = cleanArgs[1];
       const startUrl = cleanArgs[2];
@@ -61,7 +63,7 @@ async function main() {
 
       if (!goal || !startUrl) throw new Error("Missing goal or startUrl.");
 
-      console.log(`[CLI] Starting Record Mode...`);
+      console.log(`[CLI] Starting Record Mode (Visual-First: ${isVisualFirst})...`);
       const serializer = new TestSerializer();
       serializer.startTest(goal, startUrl);
 
@@ -72,7 +74,8 @@ async function main() {
       serializer.setOutPath(finalOutPath);
 
       await browser.execute({ kind: "navigate", url: startUrl });
-      await runAgent(
+      const runner = isVisualFirst ? runVisualAgent : runAgent;
+      await runner(
         goal,
         browser,
         model as any,

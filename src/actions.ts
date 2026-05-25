@@ -500,6 +500,15 @@ export const ActionSchema = z.discriminatedUnion("kind", [
         .describe("Optional URL to navigate to in the new tab"),
     })
     .describe("Open a new blank tab or window."),
+
+  z
+    .object({
+      kind: z.literal("search_snapshot"),
+      query: z
+        .string()
+        .describe("The text, role, or label to search for in the DOM snapshot. E.g., 'button', 'input', 'Sign In', 'Email textbox'"),
+    })
+    .describe("Search the snapshot for specific elements matching the query to retrieve their ref IDs."),
 ]);
 
 // Extract the inferred type to use across the project

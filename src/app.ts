@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import * as path from "path";
 import { BrowserManager } from "./browser";
 import { runAgent } from "./agent";
+import { runVisualAgent } from "./visual-agent";
 import { replayTest } from "./replay";
 import { TestSerializer } from "./recorder";
 import { google } from "@ai-sdk/google";
@@ -110,7 +111,7 @@ app.whenReady().then(async () => {
     const config = await data.getConfig();
     const modelConfig = config.models.find(m => m.id === model) || config.models[0];
     const aiModel = createModel(modelConfig);
-    const modelSupportsVision = config.enableVision && isVisionModel(modelConfig.provider, modelConfig.modelName);
+    const modelSupportsVision = config.visualFirst && isVisionModel(modelConfig.provider, modelConfig.modelName, modelConfig.supportsVision);
 
     serializer.startTest(requirement, url);
     serializer.setOutPath(suitePath);
@@ -119,8 +120,8 @@ app.whenReady().then(async () => {
     try {
       await browser.init(config.headless || false);
       await browser.execute({ kind: "navigate", url });
-
-      await runAgent(
+      const runner = config.visualFirst ? runVisualAgent : runAgent;
+      await runner(
         requirement,
         browser,
         aiModel,
@@ -266,7 +267,7 @@ app.whenReady().then(async () => {
     const config = await data.getConfig();
     const modelConfig = config.models.find(m => m.id === config.defaultModelId) || config.models[0];
     const aiModel = createModel(modelConfig);
-    const modelSupportsVision = config.enableVision && isVisionModel(modelConfig.provider, modelConfig.modelName);
+    const modelSupportsVision = config.visualFirst && isVisionModel(modelConfig.provider, modelConfig.modelName, modelConfig.supportsVision);
 
     try {
       await browser.init(config.headless || false);

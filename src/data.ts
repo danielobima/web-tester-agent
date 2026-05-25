@@ -27,6 +27,7 @@ export interface ModelConfig {
   modelName: string;
   apiKey?: string;
   baseUrl?: string;
+  supportsVision?: boolean;
 }
 
 export interface AppConfig {
@@ -34,7 +35,7 @@ export interface AppConfig {
   defaultModelId?: string;
   requirePlanApproval?: boolean;
   headless?: boolean;
-  enableVision?: boolean;
+  visualFirst?: boolean;
 }
 
 const dataDir = path.join(app.getPath("userData"), "data");
@@ -93,18 +94,20 @@ export async function getConfig(): Promise<AppConfig> {
           name: "Gemini 1.5 Flash",
           provider: "google",
           modelName: "gemini-1.5-flash",
+          supportsVision: true,
         },
         {
           id: "gemini-1.5-pro",
           name: "Gemini 1.5 Pro",
           provider: "google",
           modelName: "gemini-1.5-pro",
+          supportsVision: true,
         }
       ],
       defaultModelId: "gemini-1.5-flash",
       requirePlanApproval: true,
       headless: false,
-      enableVision: false
+      visualFirst: false
     };
   }
 }

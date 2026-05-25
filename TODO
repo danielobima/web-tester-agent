@@ -20,21 +20,22 @@
 ✔ Modify the prompts to tell the agent to search for issues and be strict about the user journey @done(26-04-22 11:09)
 ✔ The goal validation dialog should just be one tab, first the plan, then conclusion, then the issues, then the usability, then the prompt further box. @done(26-04-22 11:58)
 ✔ The first test run does not show the goalvalidation dialog @done(26-04-22 11:58)
-☐ Understand agent.ts logic
+✔ Understand agent.ts logic @done(26-05-25 12:38)
 ✔ show the report in the execution stream page @done(26-04-27 12:44)
 ✔ Show the issues in the execution stream page @done(26-04-27 15:52)
 ✔ Combine the approve and submit feedback buttons into one, change the state depending on feedback presense @done(26-04-27 15:54)
 ✔ Remove usability array and just have issues array and the agent to assign severity to each issue @done(26-04-27 16:47)
 ✔ We are getting duplicate issues @done(26-05-04 11:26)
-☐ Systematic formal way of testing: a testing framework can take a subset of the dataset
+✔ Systematic formal way of testing: a testing framework can take a subset of the dataset @done(26-05-25 12:38)
     ✔ Create a sample notebook showing how to use the framework @done(26-05-12 12:26)
-    ☐ Demonstrate how model efficiency can be increased by training using QLoRA and 4-bit quantization
+    ✔ Demonstrate how model efficiency can be increased by training using QLoRA and 4-bit quantization @done(26-05-25 12:38)
 ✔ Should be able to actually catch bugs, demo a test where there is a known defect @done(26-05-04 11:27)
 ✔ A systematic way to store agent errors, (No object generated, failed action execution etc) @done(26-05-12 12:31)
 ☐ Fix tab not found error when an existing chrome window is open - Also unable to know which tab is active
 ☐ Implement a wait command - Test
 ☐ Add autocomplete for website urls
 ☐ Fix execution retry not working
+☐ New agent approach: Send screenshot first, then agent searches the snapshot instead of passing the whole snapshot. This could potentially reduce context window usage.
 ✔ Add model selection in the frontend @done(26-05-12 12:15)
 ✔ Should be able to run replay in the test details page @done(26-05-12 12:15)
 ✔ In smaller screens the model card overlaps the execution stream @done(26-04-14 15:36)

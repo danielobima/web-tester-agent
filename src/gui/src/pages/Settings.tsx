@@ -8,6 +8,7 @@ interface ModelConfig {
   modelName: string;
   apiKey?: string;
   baseUrl?: string;
+  supportsVision?: boolean;
 }
 
 interface AppConfig {
@@ -15,13 +16,12 @@ interface AppConfig {
   defaultModelId?: string;
   requirePlanApproval?: boolean;
   headless?: boolean;
-  enableVision?: boolean;
+  visualFirst?: boolean;
 }
 
 export const Settings = () => {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
 
   // New model state
@@ -30,7 +30,8 @@ export const Settings = () => {
     provider: "google",
     modelName: "",
     apiKey: "",
-    baseUrl: ""
+    baseUrl: "",
+    supportsVision: false
   });
 
   useEffect(() => {
@@ -50,14 +51,11 @@ export const Settings = () => {
   };
 
   const handleSave = async (updatedConfig: AppConfig) => {
-    setIsSaving(true);
     try {
       await window.electron.saveConfig(updatedConfig);
       setConfig(updatedConfig);
     } catch (error) {
       console.error("Failed to save config:", error);
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -79,7 +77,8 @@ export const Settings = () => {
       provider: "google",
       modelName: "",
       apiKey: "",
-      baseUrl: ""
+      baseUrl: "",
+      supportsVision: false
     });
   };
 
@@ -137,11 +136,11 @@ export const Settings = () => {
                 <div key={model.id} className="group bg-surface-lowest p-5 rounded-xl border border-on-surface/5 flex items-center justify-between transition-all hover:border-primary/20">
                   <div className="flex items-center gap-4">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-xs ${
-                      model.provider === 'google' ? 'bg-blue-500/10 text-blue-500' :
-                      model.provider === 'ollama' ? 'bg-orange-500/10 text-orange-500' :
-                      model.provider === 'openai' ? 'bg-green-500/10 text-green-500' :
-                      'bg-purple-500/10 text-purple-500'
-                    }`}>
+                       model.provider === 'google' ? 'bg-blue-500/10 text-blue-500' :
+                       model.provider === 'ollama' ? 'bg-orange-500/10 text-orange-500' :
+                       model.provider === 'openai' ? 'bg-green-500/10 text-green-500' :
+                       'bg-purple-500/10 text-purple-500'
+                     }`}>
                       {model.provider.substring(0, 1).toUpperCase()}
                     </div>
                     <div>
@@ -149,6 +148,9 @@ export const Settings = () => {
                         <h3 className="font-bold text-on-surface">{model.name}</h3>
                         {config.defaultModelId === model.id && (
                           <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Default</span>
+                        )}
+                        {model.supportsVision && (
+                          <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Vision</span>
                         )}
                       </div>
                       <p className="text-xs text-on-surface/40 font-mono">{model.modelName} ({model.provider})</p>
@@ -207,14 +209,14 @@ export const Settings = () => {
 
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-on-surface">Enable Vision</h3>
-                  <p className="text-sm text-on-surface/40">Pass screenshots to AI models (supports Gemini/GPT-4o/Ollama Vision)</p>
+                  <h3 className="font-bold text-on-surface">Visual-First Execution</h3>
+                  <p className="text-sm text-on-surface/40">Optimize context window usage by using screenshots and snapshot search queries</p>
                 </div>
                 <button 
-                  onClick={() => handleSave({...config, enableVision: !config.enableVision})}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${config.enableVision ? 'bg-primary' : 'bg-on-surface/10'}`}
+                  onClick={() => handleSave({...config, visualFirst: !config.visualFirst})}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${config.visualFirst ? 'bg-primary' : 'bg-on-surface/10'}`}
                 >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${config.enableVision ? 'left-7' : 'left-1'}`} />
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${config.visualFirst ? 'left-7' : 'left-1'}`} />
                 </button>
               </div>
             </div>
@@ -276,6 +278,19 @@ export const Settings = () => {
                   placeholder={newModel.provider === 'ollama' ? "e.g. qwen2.5:7b" : "e.g. gpt-4o"}
                   className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm"
                 />
+              </div>
+
+              <div className="flex items-center justify-between bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3">
+                <div>
+                  <h4 className="font-bold text-sm text-on-surface">Supports Vision</h4>
+                  <p className="text-xs text-on-surface/40">This model is capable of parsing visual/image prompts</p>
+                </div>
+                <button 
+                  onClick={() => setNewModel({...newModel, supportsVision: !newModel.supportsVision})}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${newModel.supportsVision ? 'bg-primary' : 'bg-on-surface/10'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${newModel.supportsVision ? 'left-7' : 'left-1'}`} />
+                </button>
               </div>
 
               {newModel.provider === 'ollama' && (
