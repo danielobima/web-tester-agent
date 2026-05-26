@@ -23,6 +23,7 @@ import {
   estimateImageTokens,
   getTokenBreakdown,
   extractSchemaErrors,
+  reformatJsonWithAgent,
 } from "./agent/utils";
 
 import { planTask } from "./agent/planner";
@@ -30,7 +31,9 @@ import { executeTask } from "./agent/executor";
 
 import {
   Checklist,
+  ChecklistSchema,
   ExecutionResponse,
+  ExecutionResponseSchema,
   AssertionAgentResponse,
   AssertionAgentResponseSchema,
 } from "./actions";
@@ -195,7 +198,22 @@ export async function runAgent(
           let errorMessage = e.message;
           const details = extractSchemaErrors(e);
           if (details) {
-            errorMessage = `Schema validation failed:\n${details}`;
+            errorMessage = `${details}`;
+            const rawResponse = e.text || e.cause?.text || e.response?.text;
+            if (rawResponse) {
+              try {
+                checklist = await reformatJsonWithAgent({
+                  model,
+                  schema: ChecklistSchema,
+                  rawResponse,
+                  errors: details,
+                });
+                console.log(`[Agent][Planner] Successfully recovered invalid JSON using reformatter agent!`);
+                break;
+              } catch (reformatErr: any) {
+                console.error(`[Agent][Planner] Reformatter agent failed:`, reformatErr);
+              }
+            }
           }
 
 
@@ -216,7 +234,7 @@ export async function runAgent(
             content: [
               {
                 type: "text",
-                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease correct your output based on the ChecklistSchema.`,
+                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}`,
               },
             ],
           });
@@ -450,7 +468,22 @@ export async function runAgent(
           let errorMessage = e.message;
           const details = extractSchemaErrors(e);
           if (details) {
-            errorMessage = `Schema validation failed:\n${details}`;
+            errorMessage = `${details}`;
+            const rawResponse = e.text || e.cause?.text || e.response?.text;
+            if (rawResponse) {
+              try {
+                executionResponse = await reformatJsonWithAgent({
+                  model,
+                  schema: ExecutionResponseSchema,
+                  rawResponse,
+                  errors: details,
+                });
+                console.log(`[Agent][Executor] Successfully recovered invalid JSON using reformatter agent!`);
+                break;
+              } catch (reformatErr: any) {
+                console.error(`[Agent][Executor] Reformatter agent failed:`, reformatErr);
+              }
+            }
           }
 
           const rawResponse = e.text || e.cause?.text || e.response?.text;
@@ -469,7 +502,7 @@ export async function runAgent(
             content: [
               {
                 type: "text",
-                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease correct your output based on the ExecutionResponseSchema.`,
+                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}`,
               },
             ],
           });
@@ -759,7 +792,59 @@ export async function runAgent(
             let errorMessage = e.message;
             const details = extractSchemaErrors(e);
             if (details) {
-              errorMessage = `Schema validation failed:\n${details}`;
+              errorMessage = `${details}`;
+              const rawResponse = e.text || e.cause?.text || e.response?.text;
+              if (rawResponse) {
+                try {
+                  assertionResponse = await reformatJsonWithAgent({
+                    model,
+                    schema: AssertionAgentResponseSchema,
+                    rawResponse,
+                    errors: details,
+                  });
+                  console.log(`[Agent][Asserter] Successfully recovered invalid JSON using reformatter agent!`);
+
+                  if (assertionResponse && assertionResponse.assertions && assertionResponse.assertions.length > 0) {
+                    for (const ass of assertionResponse.assertions)
+                      mapRefsToIdentifiers(ass, afterRefs);
+                    console.log(
+                      `[Agent][Asserter] Executing generated assertions...`,
+                    );
+                    const { passed, failures } = await evaluateAssertions(
+                      assertionResponse.assertions,
+                      browser,
+                      afterRefs,
+                    );
+                    assertionResponse.assertions = passed;
+
+                    if (failures.length > 0) {
+                      console.error(
+                        `[Agent][Asserter] Assertions FAILED: ${failures.join("\n")}`,
+                      );
+                      assertionHistory.push({
+                        role: "assistant",
+                        content: [
+                          { type: "text", text: JSON.stringify(assertionResponse) },
+                        ],
+                      });
+                      assertionHistory.push({
+                        role: "user",
+                        content: [
+                          {
+                            type: "text",
+                            text: `The assertions you generated failed programmatic verification: ${failures.join("\n")}. Please generate different assertions that correctly reflect the actual task completion state.`,
+                          },
+                        ],
+                      });
+                      assertionRetries++;
+                      continue;
+                    }
+                  }
+                  break;
+                } catch (reformatErr: any) {
+                  console.error(`[Agent][Asserter] Reformatter agent failed:`, reformatErr);
+                }
+              }
             }
             const rawResponse = e.text || e.cause?.text || e.response?.text;
             console.log(`[Agent][Asserter] Raw response:`, rawResponse);

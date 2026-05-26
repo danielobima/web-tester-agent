@@ -34,6 +34,7 @@ export async function planTask(params: {
         ],
       },
     ],
+    temperature: 1,
   });
 
   return planningResult.object;

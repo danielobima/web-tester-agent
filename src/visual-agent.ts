@@ -23,6 +23,7 @@ import {
   estimateImageTokens,
   getTokenBreakdown,
   extractSchemaErrors,
+  reformatJsonWithAgent,
 } from "./agent/utils";
 
 import { planTask } from "./agent/planner";
@@ -30,7 +31,9 @@ import { executeTask } from "./agent/executor";
 
 import {
   Checklist,
+  ChecklistSchema,
   ExecutionResponse,
+  ExecutionResponseSchema,
   AssertionAgentResponse,
   AssertionAgentResponseSchema,
 } from "./actions";
@@ -173,7 +176,22 @@ export async function runVisualAgent(
           let errorMessage = e.message;
           const details = extractSchemaErrors(e);
           if (details) {
-            errorMessage = `Schema validation failed:\n${details}`;
+            errorMessage = `${details}`;
+            const rawResponse = e.text || e.cause?.text || e.response?.text;
+            if (rawResponse) {
+              try {
+                checklist = await reformatJsonWithAgent({
+                  model,
+                  schema: ChecklistSchema,
+                  rawResponse,
+                  errors: details,
+                });
+                console.log(`[VisualAgent][Planner] Successfully recovered invalid JSON using reformatter agent!`);
+                break;
+              } catch (reformatErr: any) {
+                console.error(`[VisualAgent][Planner] Reformatter agent failed:`, reformatErr);
+              }
+            }
           }
 
           const rawResponse = e.text || e.cause?.text || e.response?.text;
@@ -193,7 +211,7 @@ export async function runVisualAgent(
             content: [
               {
                 type: "text",
-                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease correct your output based on the ChecklistSchema.`,
+                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\n`,
               },
             ],
           });
@@ -478,7 +496,22 @@ export async function runVisualAgent(
           let errorMessage = e.message;
           const details = extractSchemaErrors(e);
           if (details) {
-            errorMessage = `Schema validation failed:\n${details}`;
+            errorMessage = `${details}`;
+            const rawResponse = e.text || e.cause?.text || e.response?.text;
+            if (rawResponse) {
+              try {
+                executionResponse = await reformatJsonWithAgent({
+                  model,
+                  schema: ExecutionResponseSchema,
+                  rawResponse,
+                  errors: details,
+                });
+                console.log(`[VisualAgent][Executor] Successfully recovered invalid JSON using reformatter agent!`);
+                break;
+              } catch (reformatErr: any) {
+                console.error(`[VisualAgent][Executor] Reformatter agent failed:`, reformatErr);
+              }
+            }
           }
 
           const rawResponse = e.text || e.cause?.text || e.response?.text;
@@ -497,7 +530,7 @@ export async function runVisualAgent(
             content: [
               {
                 type: "text",
-                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease correct your output based on the ExecutionResponseSchema.`,
+                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}`,
               },
             ],
           });
@@ -588,7 +621,7 @@ export async function runVisualAgent(
           }
         } catch (execError: any) {
           console.error(
-            `[VisualAgent] Action execution failed:`,
+            `[VisualAgent] Action execution failed: `,
             execError.message,
           );
           executionResponse.previousActionResult = `Execution failed: ${execError.message}`;
@@ -601,7 +634,7 @@ export async function runVisualAgent(
         .map((l) => `[${l.type}] ${l.text}`)
         .join("\n");
       const netText = browser.networkLogs
-        .map((n) => `[${n.method}] ${n.url} (${n.status})`)
+        .map((n) => `[${n.method}]${n.url}(${n.status})`)
         .join("\n");
 
       // Verify the task execution
@@ -623,7 +656,7 @@ export async function runVisualAgent(
                   content: [
                     {
                       type: "text",
-                      text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nBEFORE URL: ${currentTaskBeforeUrl}\nAFTER URL: ${currentUrl}\n\nConsole Logs:\n${logsText || "None"}\n\nNetwork Logs:\n${netText || "None"}`,
+                      text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nBEFORE URL: ${currentTaskBeforeUrl}\nAFTER URL: ${currentUrl}\n\nConsole Logs: \n${logsText || "None"} \n\nNetwork Logs: \n${netText || "None"} `,
                     },
                     ...(currentTaskBeforeScreenshot && supportsVision
                       ? [prepareImagePart(currentTaskBeforeScreenshot)]
@@ -637,7 +670,7 @@ export async function runVisualAgent(
             });
 
             const assertionResponse = assertionResult.object;
-            console.log(`[VisualAgent][Asserter] Response:`, assertionResponse);
+            console.log(`[VisualAgent][Asserter] Response: `, assertionResponse);
 
             if (
               serializer &&
@@ -645,7 +678,7 @@ export async function runVisualAgent(
               assertionResponse.issues.length > 0
             ) {
               serializer.logFindings(
-                `step-${stepCounter}`,
+                `step - ${stepCounter} `,
                 assertionResponse.issues,
               );
               if (onIssuesUpdate)
@@ -702,7 +735,7 @@ export async function runVisualAgent(
               if (tIdx !== -1) {
                 checklist.tasks[tIdx].status = "failed";
                 checklist.tasks[tIdx].result =
-                  `Verification failed: ${assertionResponse.verificationReasoning}`;
+                  `Verification failed: ${assertionResponse.verificationReasoning} `;
                 if (onChecklist) onChecklist(checklist);
               }
             }
@@ -710,9 +743,97 @@ export async function runVisualAgent(
             break;
           } catch (assError: any) {
             assRetries++;
+            let errorMessage = assError.message;
+            const details = extractSchemaErrors(assError);
+            if (details) {
+              errorMessage = `${details}`;
+              const rawResponse = assError.text || assError.cause?.text || assError.response?.text;
+              if (rawResponse) {
+                try {
+                  const assertionResponse = await reformatJsonWithAgent({
+                    model,
+                    schema: AssertionAgentResponseSchema,
+                    rawResponse,
+                    errors: details,
+                  });
+                  console.log(`[VisualAgent][Asserter] Successfully recovered invalid JSON using reformatter agent!`);
+
+                  if (
+                    serializer &&
+                    assertionResponse.issues &&
+                    assertionResponse.issues.length > 0
+                  ) {
+                    serializer.logFindings(
+                      `step - ${stepCounter} `,
+                      assertionResponse.issues,
+                    );
+                    if (onIssuesUpdate)
+                      onIssuesUpdate(serializer.getTest()?.issues || []);
+                  }
+
+                  const afterAx = await browser.getSnapshotForLLM(
+                    false,
+                    false,
+                    fullSnapshot,
+                  );
+                  const afterRefs = afterAx.refs;
+
+                  if (
+                    assertionResponse.assertions &&
+                    Array.isArray(assertionResponse.assertions)
+                  ) {
+                    for (const ass of assertionResponse.assertions) {
+                      mapRefsToIdentifiers(ass, afterRefs);
+                    }
+                    const { passed, failures } = await evaluateAssertions(
+                      assertionResponse.assertions,
+                      browser,
+                      afterRefs,
+                    );
+                    if (failures.length > 0) {
+                      isVerified = false;
+                    }
+                  }
+
+                  if (isVerified) {
+                    const tIdx = checklist.tasks.findIndex(
+                      (t) => t.id === currentTask.id,
+                    );
+                    if (tIdx !== -1) {
+                      checklist.tasks[tIdx].status = "completed";
+                      checklist.tasks[tIdx].result =
+                        assertionResponse.verificationReasoning;
+                      if (onChecklist) onChecklist(checklist);
+                    }
+                    if (
+                      serializer &&
+                      assertionResponse.assertions &&
+                      assertionResponse.assertions.length > 0
+                    ) {
+                      serializer.logVerificationToLastStep(
+                        assertionResponse.assertions,
+                      );
+                    }
+                  } else {
+                    const tIdx = checklist.tasks.findIndex(
+                      (t) => t.id === currentTask.id,
+                    );
+                    if (tIdx !== -1) {
+                      checklist.tasks[tIdx].status = "failed";
+                      checklist.tasks[tIdx].result =
+                        `Verification failed: ${assertionResponse.verificationReasoning} `;
+                      if (onChecklist) onChecklist(checklist);
+                    }
+                  }
+                  break;
+                } catch (reformatErr: any) {
+                  console.error(`[VisualAgent][Asserter] Reformatter agent failed:`, reformatErr);
+                }
+              }
+            }
             console.warn(
-              `[VisualAgent][Asserter] Retry ${assRetries} due to:`,
-              assError.message,
+              `[VisualAgent][Asserter] Retry ${assRetries} due to: `,
+              errorMessage,
             );
             if (assRetries >= maxAssRetries) {
               isVerified = false;
@@ -731,10 +852,10 @@ export async function runVisualAgent(
       // Show step update in UI
       if (onStep && currentTask) {
         onStep({
-          id: `step-${stepCounter}`,
-          step: `Action: ${action.kind}`,
+          id: `step - ${stepCounter} `,
+          step: `Action: ${action.kind} `,
           status: isVerified ? "success" : "failed",
-          duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
+          duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)} s`,
           description: executionResponse.intendedActionDescription,
           stateDescription:
             executionResponse.previousActionResult ||
@@ -775,7 +896,7 @@ export async function runVisualAgent(
           content: [
             {
               type: "text",
-              text: `Previous action result: ${executionResponse.previousActionResult}`,
+              text: `Previous action result: ${executionResponse.previousActionResult} `,
             },
           ],
         });

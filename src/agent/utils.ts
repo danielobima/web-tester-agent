@@ -4,8 +4,9 @@ import { type Checklist } from "../actions";
 import { type TokenBreakdown } from "../error_logger";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import { fromError } from "zod-validation-error";
+import { generateObject, type LanguageModel } from "ai";
 
 export function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   if (!obj) return;
@@ -146,6 +147,7 @@ export function getTokenBreakdown(params: {
 export function extractSchemaErrors(e: any): string | null {
   if (!e) return null;
 
+
   // Helper to find a ZodError or issues array in the error structure
   const findZodErrorOrIssues = (err: any): ZodError | any[] | null => {
     if (err instanceof ZodError || (err && typeof err === "object" && err.constructor?.name === "ZodError")) {
@@ -176,12 +178,46 @@ export function extractSchemaErrors(e: any): string | null {
     }
 
     return fromError(zodError, {
-      prefix: "The JSON structure you generated failed validation with the following errors:",
-      issueSeparator: "; ",
+      prefix: "Please regenerate the JSON and fix the following errors:",
+      issueSeparator: "\n",
       unionSeparator: " OR ",
     }).toString();
   } catch (err) {
     console.error("Error formatting Zod error:", err);
     return null;
   }
+}
+
+export async function reformatJsonWithAgent<T>(params: {
+  model: LanguageModel;
+  schema: z.ZodSchema<T>;
+  rawResponse: string;
+  errors: string;
+}): Promise<T> {
+  console.log(`[Agent][Reformatter] Attempting to reformat invalid JSON with dedicated reformatter agent...`);
+
+  const result = await generateObject({
+    model: params.model,
+    schema: params.schema,
+    system: `You are a dedicated JSON repair/reformatting assistant. 
+Your sole task is to take a raw text response that failed Zod validation and repair/reformat it to strictly conform to the expected JSON schema.
+Ensure all missing fields are added (with default/reasonable values based on context if needed), invalid formats/types are corrected, and enum constraints are strictly met.
+Keep the original semantics, tasks, reasoning, and descriptions from the invalid JSON intact where possible.`,
+    messages: [
+      {
+        role: "user",
+        content: `The following raw output failed validation against the schema:
+\`\`\`
+${params.rawResponse}
+\`\`\`
+
+Validation errors encountered:
+${params.errors}
+
+Please correct the JSON completely so that it matches the schema exactly and passes all validation checks.`,
+      },
+    ],
+  });
+
+  return result.object;
 }
