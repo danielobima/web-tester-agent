@@ -3,7 +3,6 @@ import { BrowserManager } from "./browser";
 import { TestSerializer } from "./recorder";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { z } from "zod";
 import { evaluateAssertions } from "./replay";
 import { saveAgentErrorReport, type TokenBreakdown } from "./error_logger";
 import { prepareImagePart } from "./utils";
@@ -22,6 +21,7 @@ import {
   estimateTextTokens,
   estimateImageTokens,
   getTokenBreakdown,
+  runWithSchemaRecovery,
   extractSchemaErrors,
   reformatJsonWithAgent,
 } from "./agent/utils";
@@ -152,109 +152,70 @@ export async function runVisualAgent(
       if (onPlanning) onPlanning(true);
       const planningStartTime = Date.now();
 
-      let planRetries = 0;
-      const maxPlanRetries = 3;
+      const visualStateSnapshot =
+        "(DOM snapshot hidden. Focus entirely on the visual layout, URL, and checklist.)";
 
-      while (planRetries < maxPlanRetries) {
-        try {
-          // Pass a visual-first state placeholder to the planner
-          const visualStateSnapshot =
-            "(DOM snapshot hidden. Focus entirely on the visual layout, URL, and checklist.)";
-          checklist = await planTask({
-            model,
-            requirement,
-            checklist,
-            snapshot: visualStateSnapshot,
+      checklist = await runWithSchemaRecovery({
+        model,
+        schema: ChecklistSchema,
+        label: "Planner",
+        history,
+        taskFn: () => planTask({
+          model,
+          requirement,
+          checklist,
+          snapshot: visualStateSnapshot,
+          history,
+          planningPrompt,
+          screenshot,
+          supportsVision,
+        }),
+        onMaxRetriesExceeded: async (e) => {
+          if (onPlanning) onPlanning(false);
+          const tokenBreakdown = getTokenBreakdown({
+            systemPrompt: planningPrompt,
             history,
-            planningPrompt,
+            latestUserText: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}`,
             screenshot,
             supportsVision,
           });
-          break;
-        } catch (e: any) {
-          planRetries++;
-          let errorMessage = e.message;
-          const details = extractSchemaErrors(e);
-          if (details) {
-            errorMessage = `${details}`;
-            const rawResponse = e.text || e.cause?.text || e.response?.text;
-            if (rawResponse) {
-              try {
-                checklist = await reformatJsonWithAgent({
-                  model,
-                  schema: ChecklistSchema,
-                  rawResponse,
-                  errors: details,
-                });
-                console.log(`[VisualAgent][Planner] Successfully recovered invalid JSON using reformatter agent!`);
-                break;
-              } catch (reformatErr: any) {
-                console.error(`[VisualAgent][Planner] Reformatter agent failed:`, reformatErr);
-              }
-            }
-          }
 
-          const rawResponse = e.text || e.cause?.text || e.response?.text;
-          console.log(`[VisualAgent][Planner] Raw response:`, rawResponse);
-
-          history.push({
-            role: "assistant",
-            content: [
+          if (artifactsDir) {
+            await saveAgentErrorReport(
+              artifactsDir,
               {
-                type: "text",
-                text: rawResponse || JSON.stringify({ error: errorMessage }),
+                error: e,
+                type: "planning",
+                step: stepCounter,
+                requirement,
+                url: currentUrl,
+                history: [...history],
+                snapshot,
+                axTree,
+                refs,
+                checklist,
+                llmPrompt: planningPrompt,
+                llmRawResponse: e.text || e.cause?.text || e.response?.text,
+                tokenBreakdown,
               },
-            ],
-          });
-          history.push({
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\n`,
-              },
-            ],
-          });
-
-          if (planRetries >= maxPlanRetries) {
-            if (onPlanning) onPlanning(false);
-            const tokenBreakdown = getTokenBreakdown({
-              systemPrompt: planningPrompt,
-              history,
-              latestUserText: `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}`,
-              screenshot,
-              supportsVision,
-            });
-
-            if (artifactsDir) {
-              await saveAgentErrorReport(
-                artifactsDir,
-                {
-                  error: e,
-                  type: "planning",
-                  step: stepCounter,
-                  requirement,
-                  url: currentUrl,
-                  history: [...history],
-                  snapshot,
-                  axTree,
-                  refs,
-                  checklist,
-                  llmPrompt: planningPrompt,
-                  llmRawResponse: rawResponse,
-                  tokenBreakdown,
-                },
-                browser,
-              );
-            }
-            throw e;
+              browser,
+            );
           }
         }
-      }
+      });
 
       console.log("[VisualAgent][Planner] Planning result:", checklist);
       if (onChecklist) onChecklist(checklist);
-      if (serializer) serializer.updateChecklist(checklist);
+      if (serializer) {
+        serializer.updateChecklist(checklist);
+        if (checklist.issues && checklist.issues.length > 0) {
+          serializer.logFindings(`step-${stepCounter}`, checklist.issues);
+          if (onIssuesUpdate) {
+            onIssuesUpdate(serializer.getTest()?.issues || []);
+          }
+        }
+        await serializer.saveTest();
+      }
 
       if (needsPlanApproval && onPlanApproval) {
         if (onPlanning) onPlanning(false);
@@ -402,20 +363,24 @@ export async function runVisualAgent(
           throw new Error("Test run aborted by user.");
         }
 
-        try {
-          const currentIssues =
-            serializer?.getTest()?.issues || checklist.issues || [];
-          const issuesSummary = currentIssues
-            .map((i) => `${i.id}: ${i.description}`)
-            .join("; ");
+        const currentIssues =
+          serializer?.getTest()?.issues || checklist.issues || [];
+        const issuesSummary = currentIssues
+          .map((i) => `${i.id}: ${i.description}`)
+          .join("; ");
 
-          console.log("[VisualAgent][Executor] Beginning execution turn");
+        console.log("[VisualAgent][Executor] Beginning execution turn");
 
-          // Keep snapshot hidden for LLM
-          const hiddenSnapshot =
-            "(Complete DOM snapshot hidden. Use 'search_snapshot' to locate reference IDs, or issue immediate actions.)";
+        // Keep snapshot hidden for LLM
+        const hiddenSnapshot =
+          "(Complete DOM snapshot hidden. Use 'search_snapshot' to locate reference IDs, or issue immediate actions.)";
 
-          executionResponse = await executeTask({
+        executionResponse = await runWithSchemaRecovery({
+          model,
+          schema: ExecutionResponseSchema,
+          label: "Executor",
+          history,
+          taskFn: () => executeTask({
             model,
             requirement,
             currentTask,
@@ -427,115 +392,8 @@ export async function runVisualAgent(
             supportsVision,
             consecutiveSameAction,
             serializer,
-          });
-
-          const action = executionResponse.action;
-
-          if (action.kind === "search_snapshot") {
-            searchesCount++;
-            const query = action.query;
-            console.log(
-              `[VisualAgent][Executor] Intercepting search_snapshot. Query: "${query}"`,
-            );
-
-            const lines = snapshot.split("\n");
-            const matches = lines.filter((line) =>
-              line.toLowerCase().includes(query.toLowerCase()),
-            );
-
-            let resultsText = "";
-            if (matches.length === 0) {
-              resultsText = `No elements found matching "${query}". Try searching for HTML roles (e.g. "button", "textbox"), text labels, or broad categories.`;
-            } else {
-              resultsText =
-                `Search results for "${query}":\n` + matches.join("\n");
-            }
-
-            // Record turn in history so LLM gets it
-            history.push({
-              role: "assistant",
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(executionResponse),
-                },
-              ],
-            });
-
-            history.push({
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: `Search results for query "${query}":\n\n${resultsText}\n\nSelect the next action using these reference IDs.`,
-                },
-              ],
-            });
-
-            if (onStep) {
-              onStep({
-                id: `search-${stepCounter}-${searchesCount}`,
-                step: `Searching DOM for "${query}"`,
-                status: "success",
-                duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
-                description: `Queried snapshot for "${query}". Found ${matches.length} elements.`,
-                stateDescription: resultsText,
-                screenshot: screenshotPath,
-                url: currentUrl,
-                action: action,
-              });
-            }
-
-            // Perform another execution turn in-place
-            continue;
-          }
-
-          break;
-        } catch (e: any) {
-          retries++;
-          let errorMessage = e.message;
-          const details = extractSchemaErrors(e);
-          if (details) {
-            errorMessage = `${details}`;
-            const rawResponse = e.text || e.cause?.text || e.response?.text;
-            if (rawResponse) {
-              try {
-                executionResponse = await reformatJsonWithAgent({
-                  model,
-                  schema: ExecutionResponseSchema,
-                  rawResponse,
-                  errors: details,
-                });
-                console.log(`[VisualAgent][Executor] Successfully recovered invalid JSON using reformatter agent!`);
-                break;
-              } catch (reformatErr: any) {
-                console.error(`[VisualAgent][Executor] Reformatter agent failed:`, reformatErr);
-              }
-            }
-          }
-
-          const rawResponse = e.text || e.cause?.text || e.response?.text;
-          console.log(`[VisualAgent][Executor] Raw response:`, rawResponse);
-          history.push({
-            role: "assistant",
-            content: [
-              {
-                type: "text",
-                text: e.text || JSON.stringify({ error: errorMessage }),
-              },
-            ],
-          });
-          history.push({
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}`,
-              },
-            ],
-          });
-
-          if (retries >= maxRetries) {
+          }),
+          onMaxRetriesExceeded: async (e) => {
             const tokenBreakdown = getTokenBreakdown({
               systemPrompt: executionPrompt,
               history,
@@ -561,15 +419,77 @@ export async function runVisualAgent(
                   refs,
                   checklist,
                   llmPrompt: executionPrompt,
-                  llmRawResponse: e.text,
+                  llmRawResponse: e.text || e.cause?.text || e.response?.text,
                   tokenBreakdown,
                 },
                 browser,
               );
             }
-            throw new Error(errorMessage);
           }
+        });
+
+        const action = executionResponse.action;
+
+        if (action.kind === "search_snapshot") {
+          searchesCount++;
+          const query = action.query;
+          console.log(
+            `[VisualAgent][Executor] Intercepting search_snapshot. Query: "${query}"`,
+          );
+
+          const lines = snapshot.split("\n");
+          const matches = lines.filter((line) =>
+            line.toLowerCase().includes(query.toLowerCase()),
+          );
+
+          let resultsText = "";
+          if (matches.length === 0) {
+            resultsText = `No elements found matching "${query}". Try searching for HTML roles (e.g. "button", "textbox"), text labels, or broad categories.`;
+          } else {
+            resultsText =
+              matches.join("\n");
+          }
+
+          // Record turn in history so LLM gets it
+          history.push({
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(executionResponse),
+              },
+            ],
+          });
+
+          history.push({
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `Search results for query "${query}":\n\n${resultsText}\n\nSelect the next action using these reference IDs.`,
+              },
+            ],
+          });
+
+          if (onStep) {
+            onStep({
+              id: `search-${stepCounter}-${searchesCount}`,
+              step: `Searching DOM for "${query}"`,
+              status: "success",
+              duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
+              description: `Queried snapshot for "${query}". Found ${matches.length} elements.`,
+              stateDescription: resultsText,
+              screenshot: screenshotPath,
+              url: currentUrl,
+              action: action,
+            });
+          }
+
+          // Perform another execution turn in-place
+          continue;
         }
+
+        break;
       }
 
       if (!executionResponse)
@@ -640,11 +560,14 @@ export async function runVisualAgent(
       // Verify the task execution
       let isVerified = true;
       if (!skipAssertions && currentTask && executionResponse.isTaskComplete) {
-        let assRetries = 0;
-        const maxAssRetries = 3;
+        const assertionHistory: any[] = [];
 
-        while (assRetries < maxAssRetries) {
-          try {
+        const assertionResponse = await runWithSchemaRecovery({
+          model,
+          schema: AssertionAgentResponseSchema,
+          label: "Asserter",
+          history: assertionHistory,
+          taskFn: async () => {
             console.log(`[VisualAgent][Asserter] Verifying task completion...`);
             const assertionResult = await generateObject({
               model,
@@ -669,17 +592,17 @@ export async function runVisualAgent(
               ],
             });
 
-            const assertionResponse = assertionResult.object;
-            console.log(`[VisualAgent][Asserter] Response: `, assertionResponse);
+            const res = assertionResult.object;
+            console.log(`[VisualAgent][Asserter] Response: `, res);
 
             if (
               serializer &&
-              assertionResponse.issues &&
-              assertionResponse.issues.length > 0
+              res.issues &&
+              res.issues.length > 0
             ) {
               serializer.logFindings(
                 `step - ${stepCounter} `,
-                assertionResponse.issues,
+                res.issues,
               );
               if (onIssuesUpdate)
                 onIssuesUpdate(serializer.getTest()?.issues || []);
@@ -693,150 +616,61 @@ export async function runVisualAgent(
             const afterRefs = afterAx.refs;
 
             if (
-              assertionResponse.assertions &&
-              Array.isArray(assertionResponse.assertions)
+              res.assertions &&
+              Array.isArray(res.assertions)
             ) {
-              for (const ass of assertionResponse.assertions) {
+              for (const ass of res.assertions) {
                 mapRefsToIdentifiers(ass, afterRefs);
               }
               const { passed, failures } = await evaluateAssertions(
-                assertionResponse.assertions,
+                res.assertions,
                 browser,
                 afterRefs,
               );
+              res.assertions = passed;
+
               if (failures.length > 0) {
                 isVerified = false;
+                throw new Error(`The assertions you generated failed programmatic verification: ${failures.join("\n")}`);
               }
             }
 
-            if (isVerified) {
-              const tIdx = checklist.tasks.findIndex(
-                (t) => t.id === currentTask.id,
-              );
-              if (tIdx !== -1) {
-                checklist.tasks[tIdx].status = "completed";
-                checklist.tasks[tIdx].result =
-                  assertionResponse.verificationReasoning;
-                if (onChecklist) onChecklist(checklist);
-              }
-              if (
-                serializer &&
-                assertionResponse.assertions &&
-                assertionResponse.assertions.length > 0
-              ) {
-                serializer.logVerificationToLastStep(
-                  assertionResponse.assertions,
-                );
-              }
-            } else {
-              const tIdx = checklist.tasks.findIndex(
-                (t) => t.id === currentTask.id,
-              );
-              if (tIdx !== -1) {
-                checklist.tasks[tIdx].status = "failed";
-                checklist.tasks[tIdx].result =
-                  `Verification failed: ${assertionResponse.verificationReasoning} `;
-                if (onChecklist) onChecklist(checklist);
-              }
-            }
+            return res;
+          },
+          onMaxRetriesExceeded: (e) => {
+            isVerified = false;
+          }
+        });
 
-            break;
-          } catch (assError: any) {
-            assRetries++;
-            let errorMessage = assError.message;
-            const details = extractSchemaErrors(assError);
-            if (details) {
-              errorMessage = `${details}`;
-              const rawResponse = assError.text || assError.cause?.text || assError.response?.text;
-              if (rawResponse) {
-                try {
-                  const assertionResponse = await reformatJsonWithAgent({
-                    model,
-                    schema: AssertionAgentResponseSchema,
-                    rawResponse,
-                    errors: details,
-                  });
-                  console.log(`[VisualAgent][Asserter] Successfully recovered invalid JSON using reformatter agent!`);
-
-                  if (
-                    serializer &&
-                    assertionResponse.issues &&
-                    assertionResponse.issues.length > 0
-                  ) {
-                    serializer.logFindings(
-                      `step - ${stepCounter} `,
-                      assertionResponse.issues,
-                    );
-                    if (onIssuesUpdate)
-                      onIssuesUpdate(serializer.getTest()?.issues || []);
-                  }
-
-                  const afterAx = await browser.getSnapshotForLLM(
-                    false,
-                    false,
-                    fullSnapshot,
-                  );
-                  const afterRefs = afterAx.refs;
-
-                  if (
-                    assertionResponse.assertions &&
-                    Array.isArray(assertionResponse.assertions)
-                  ) {
-                    for (const ass of assertionResponse.assertions) {
-                      mapRefsToIdentifiers(ass, afterRefs);
-                    }
-                    const { passed, failures } = await evaluateAssertions(
-                      assertionResponse.assertions,
-                      browser,
-                      afterRefs,
-                    );
-                    if (failures.length > 0) {
-                      isVerified = false;
-                    }
-                  }
-
-                  if (isVerified) {
-                    const tIdx = checklist.tasks.findIndex(
-                      (t) => t.id === currentTask.id,
-                    );
-                    if (tIdx !== -1) {
-                      checklist.tasks[tIdx].status = "completed";
-                      checklist.tasks[tIdx].result =
-                        assertionResponse.verificationReasoning;
-                      if (onChecklist) onChecklist(checklist);
-                    }
-                    if (
-                      serializer &&
-                      assertionResponse.assertions &&
-                      assertionResponse.assertions.length > 0
-                    ) {
-                      serializer.logVerificationToLastStep(
-                        assertionResponse.assertions,
-                      );
-                    }
-                  } else {
-                    const tIdx = checklist.tasks.findIndex(
-                      (t) => t.id === currentTask.id,
-                    );
-                    if (tIdx !== -1) {
-                      checklist.tasks[tIdx].status = "failed";
-                      checklist.tasks[tIdx].result =
-                        `Verification failed: ${assertionResponse.verificationReasoning} `;
-                      if (onChecklist) onChecklist(checklist);
-                    }
-                  }
-                  break;
-                } catch (reformatErr: any) {
-                  console.error(`[VisualAgent][Asserter] Reformatter agent failed:`, reformatErr);
-                }
-              }
-            }
-            console.warn(
-              `[VisualAgent][Asserter] Retry ${assRetries} due to: `,
-              errorMessage,
+        if (assertionResponse) {
+          if (isVerified) {
+            const tIdx = checklist.tasks.findIndex(
+              (t) => t.id === currentTask.id,
             );
-            if (assRetries >= maxAssRetries) {
-              isVerified = false;
+            if (tIdx !== -1) {
+              checklist.tasks[tIdx].status = "completed";
+              checklist.tasks[tIdx].result =
+                assertionResponse.verificationReasoning;
+              if (onChecklist) onChecklist(checklist);
+            }
+            if (
+              serializer &&
+              assertionResponse.assertions &&
+              assertionResponse.assertions.length > 0
+            ) {
+              serializer.logVerificationToLastStep(
+                assertionResponse.assertions,
+              );
+            }
+          } else {
+            const tIdx = checklist.tasks.findIndex(
+              (t) => t.id === currentTask.id,
+            );
+            if (tIdx !== -1) {
+              checklist.tasks[tIdx].status = "failed";
+              checklist.tasks[tIdx].result =
+                `Verification failed: ${assertionResponse.verificationReasoning} `;
+              if (onChecklist) onChecklist(checklist);
             }
           }
         }

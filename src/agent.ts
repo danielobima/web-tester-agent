@@ -22,8 +22,7 @@ import {
   estimateTextTokens,
   estimateImageTokens,
   getTokenBreakdown,
-  extractSchemaErrors,
-  reformatJsonWithAgent,
+  runWithSchemaRecovery,
 } from "./agent/utils";
 
 import { planTask } from "./agent/planner";
@@ -178,108 +177,69 @@ export async function runAgent(
       const planningStartTime = Date.now();
       if (onPlanning) onPlanning(true);
 
-      let planRetries = 0;
-      const maxPlanRetries = 3;
-      while (planRetries < maxPlanRetries) {
-        try {
-          checklist = await planTask({
-            model,
-            requirement,
-            checklist,
-            snapshot,
+      checklist = await runWithSchemaRecovery({
+        model,
+        schema: ChecklistSchema,
+        label: "Planner",
+        history,
+        taskFn: () => planTask({
+          model,
+          requirement,
+          checklist,
+          snapshot,
+          history,
+          planningPrompt,
+          screenshot,
+          supportsVision,
+        }),
+        onMaxRetriesExceeded: async (e) => {
+          if (onPlanning) onPlanning(false);
+          const latestUserText = `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`;
+          const tokenBreakdown = getTokenBreakdown({
+            systemPrompt: planningPrompt,
             history,
-            planningPrompt,
+            latestUserText,
             screenshot,
             supportsVision,
           });
-          break;
-        } catch (e: any) {
-          planRetries++;
-          let errorMessage = e.message;
-          const details = extractSchemaErrors(e);
-          if (details) {
-            errorMessage = `${details}`;
-            const rawResponse = e.text || e.cause?.text || e.response?.text;
-            if (rawResponse) {
-              try {
-                checklist = await reformatJsonWithAgent({
-                  model,
-                  schema: ChecklistSchema,
-                  rawResponse,
-                  errors: details,
-                });
-                console.log(`[Agent][Planner] Successfully recovered invalid JSON using reformatter agent!`);
-                break;
-              } catch (reformatErr: any) {
-                console.error(`[Agent][Planner] Reformatter agent failed:`, reformatErr);
-              }
-            }
-          }
+          console.error(`[Agent][Planner] Error occurred. Input token size breakdown:`, tokenBreakdown);
 
-
-          const rawResponse = e.text || e.cause?.text || e.response?.text;
-          console.log(`[Agent][Planner] Raw response:`, rawResponse);
-
-          history.push({
-            role: "assistant",
-            content: [
+          if (artifactsDir) {
+            await saveAgentErrorReport(
+              artifactsDir,
               {
-                type: "text",
-                text: rawResponse || JSON.stringify({ error: errorMessage }),
+                error: e,
+                type: "planning",
+                step: stepCounter,
+                requirement,
+                url: currentUrl,
+                history: [...history],
+                snapshot,
+                axTree,
+                refs,
+                checklist,
+                llmPrompt: planningPrompt,
+                llmRawResponse: e.text || e.cause?.text || e.response?.text,
+                tokenBreakdown,
               },
-            ],
-          });
-          history.push({
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}`,
-              },
-            ],
-          });
-
-          if (planRetries >= maxPlanRetries) {
-            if (onPlanning) onPlanning(false);
-            const latestUserText = `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`;
-            const tokenBreakdown = getTokenBreakdown({
-              systemPrompt: planningPrompt,
-              history,
-              latestUserText,
-              screenshot,
-              supportsVision,
-            });
-            console.error(`[Agent][Planner] Error occurred. Input token size breakdown:`, tokenBreakdown);
-
-            if (artifactsDir) {
-              await saveAgentErrorReport(
-                artifactsDir,
-                {
-                  error: e,
-                  type: "planning",
-                  step: stepCounter,
-                  requirement,
-                  url: currentUrl,
-                  history: [...history],
-                  snapshot,
-                  axTree,
-                  refs,
-                  checklist,
-                  llmPrompt: planningPrompt,
-                  llmRawResponse: rawResponse,
-                  tokenBreakdown,
-                },
-                browser,
-              );
-            }
-            throw e;
+              browser,
+            );
           }
         }
-      }
+      });
 
       console.log("[Agent][Planner] Planning result:", checklist);
       if (onChecklist) onChecklist(checklist);
-      if (serializer) serializer.updateChecklist(checklist);
+      if (serializer) {
+        serializer.updateChecklist(checklist);
+        if (checklist.issues && checklist.issues.length > 0) {
+          serializer.logFindings(`step-${stepCounter}`, checklist.issues);
+          if (onIssuesUpdate) {
+            onIssuesUpdate(serializer.getTest()?.issues || []);
+          }
+        }
+        await serializer.saveTest();
+      }
 
       if (needsPlanApproval && onPlanApproval) {
         if (onPlanning) onPlanning(false);
@@ -435,122 +395,68 @@ export async function runAgent(
         technicalObservations +
         knownIssuesText;
       let executionResponse: ExecutionResponse | undefined;
-      let retries = 0;
-      const maxRetries = 3;
       const actionStartTime = Date.now();
 
-      while (retries < maxRetries) {
-        try {
+      executionResponse = await runWithSchemaRecovery({
+        model,
+        schema: ExecutionResponseSchema,
+        label: "Executor",
+        history,
+        taskFn: () => executeTask({
+          model,
+          requirement,
+          currentTask,
+          checklist,
+          snapshot,
+          history,
+          executionPromptTemplate,
+          screenshot,
+          supportsVision,
+          consecutiveSameAction,
+          serializer,
+        }),
+        onMaxRetriesExceeded: async (e) => {
           const currentIssues =
             serializer?.getTest()?.issues || checklist.issues || [];
           const issuesSummary = currentIssues
             .map((i) => `${i.id}: ${i.description}`)
             .join("; ");
+          const latestUserText = `Goal: ${requirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction && consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`;
 
-          console.log("[Agent][Executor] Beginning execution prompt");
-
-          executionResponse = await executeTask({
-            model,
-            requirement,
-            currentTask,
-            checklist,
-            snapshot,
+          const tokenBreakdown = getTokenBreakdown({
+            systemPrompt: executionPrompt,
             history,
-            executionPromptTemplate,
+            latestUserText,
             screenshot,
             supportsVision,
-            consecutiveSameAction,
-            serializer,
           });
-          break;
-        } catch (e: any) {
-          retries++;
-          let errorMessage = e.message;
-          const details = extractSchemaErrors(e);
-          if (details) {
-            errorMessage = `${details}`;
-            const rawResponse = e.text || e.cause?.text || e.response?.text;
-            if (rawResponse) {
-              try {
-                executionResponse = await reformatJsonWithAgent({
-                  model,
-                  schema: ExecutionResponseSchema,
-                  rawResponse,
-                  errors: details,
-                });
-                console.log(`[Agent][Executor] Successfully recovered invalid JSON using reformatter agent!`);
-                break;
-              } catch (reformatErr: any) {
-                console.error(`[Agent][Executor] Reformatter agent failed:`, reformatErr);
-              }
-            }
-          }
+          console.error(`[Agent][Executor] Error occurred. Input token size breakdown:`, tokenBreakdown);
 
-          const rawResponse = e.text || e.cause?.text || e.response?.text;
-          console.log(`[Agent][Executor] Raw response:`, rawResponse);
-          history.push({
-            role: "assistant",
-            content: [
+          if (artifactsDir) {
+            await saveAgentErrorReport(
+              artifactsDir,
               {
-                type: "text",
-                text: e.text || JSON.stringify({ error: errorMessage }),
+                error: e,
+                type: "execution",
+                step: stepCounter,
+                requirement,
+                url: currentUrl,
+                taskId: currentTaskId,
+                taskDescription: currentTask.description,
+                history: [...history],
+                snapshot,
+                axTree,
+                refs,
+                checklist,
+                llmPrompt: executionPrompt,
+                llmRawResponse: e.text || e.cause?.text || e.response?.text,
+                tokenBreakdown,
               },
-            ],
-          });
-          history.push({
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}`,
-              },
-            ],
-          });
-
-          if (retries >= maxRetries) {
-            const currentIssues =
-              serializer?.getTest()?.issues || checklist.issues || [];
-            const issuesSummary = currentIssues
-              .map((i) => `${i.id}: ${i.description}`)
-              .join("; ");
-            const latestUserText = `Goal: ${requirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction && consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`;
-
-            const tokenBreakdown = getTokenBreakdown({
-              systemPrompt: executionPrompt,
-              history,
-              latestUserText,
-              screenshot,
-              supportsVision,
-            });
-            console.error(`[Agent][Executor] Error occurred. Input token size breakdown:`, tokenBreakdown);
-
-            if (artifactsDir) {
-              await saveAgentErrorReport(
-                artifactsDir,
-                {
-                  error: e,
-                  type: "execution",
-                  step: stepCounter,
-                  requirement,
-                  url: currentUrl,
-                  taskId: currentTaskId,
-                  taskDescription: currentTask.description,
-                  history: [...history],
-                  snapshot,
-                  axTree,
-                  refs,
-                  checklist,
-                  llmPrompt: executionPrompt,
-                  llmRawResponse: e.text,
-                  tokenBreakdown,
-                },
-                browser,
-              );
-            }
-            throw new Error(errorMessage);
+              browser,
+            );
           }
         }
-      }
+      });
 
       if (!executionResponse)
         throw new Error(
@@ -713,12 +619,14 @@ export async function runAgent(
         });
 
         const verificationStartTime = Date.now();
-        let assertionRetries = 0;
-        let assertionResponse: AssertionAgentResponse | undefined;
         const assertionHistory: any[] = [];
 
-        while (assertionRetries < 3) {
-          try {
+        let assertionResponse = await runWithSchemaRecovery({
+          model,
+          schema: AssertionAgentResponseSchema,
+          label: "Asserter",
+          history: assertionHistory,
+          taskFn: async () => {
             const currentIssues =
               serializer?.getTest()?.issues || checklist.issues || [];
             const issuesSummary = currentIssues
@@ -748,107 +656,28 @@ export async function runAgent(
                 ...assertionHistory,
               ],
             });
-            assertionResponse = assertionResult.object;
+            const res = assertionResult.object;
 
-            if (assertionResponse && assertionResponse.assertions && assertionResponse.assertions.length > 0) {
-              for (const ass of assertionResponse.assertions)
+            if (res && res.assertions && res.assertions.length > 0) {
+              for (const ass of res.assertions)
                 mapRefsToIdentifiers(ass, afterRefs);
               console.log(
                 `[Agent][Asserter] Executing generated assertions...`,
               );
               const { passed, failures } = await evaluateAssertions(
-                assertionResponse.assertions,
+                res.assertions,
                 browser,
                 afterRefs,
               );
-              assertionResponse.assertions = passed;
+              res.assertions = passed;
 
               if (failures.length > 0) {
-                console.error(
-                  `[Agent][Asserter] Assertions FAILED: ${failures.join("\n")}`,
-                );
-                assertionHistory.push({
-                  role: "assistant",
-                  content: [
-                    { type: "text", text: JSON.stringify(assertionResponse) },
-                  ],
-                });
-                assertionHistory.push({
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: `The assertions you generated failed programmatic verification: ${failures.join("\n")}. Please generate different assertions that correctly reflect the actual task completion state.`,
-                    },
-                  ],
-                });
-                assertionRetries++;
-                continue;
+                throw new Error(`The assertions you generated failed programmatic verification: ${failures.join("\n")}`);
               }
             }
-            break;
-          } catch (e: any) {
-            assertionRetries++;
-            let errorMessage = e.message;
-            const details = extractSchemaErrors(e);
-            if (details) {
-              errorMessage = `${details}`;
-              const rawResponse = e.text || e.cause?.text || e.response?.text;
-              if (rawResponse) {
-                try {
-                  assertionResponse = await reformatJsonWithAgent({
-                    model,
-                    schema: AssertionAgentResponseSchema,
-                    rawResponse,
-                    errors: details,
-                  });
-                  console.log(`[Agent][Asserter] Successfully recovered invalid JSON using reformatter agent!`);
-
-                  if (assertionResponse && assertionResponse.assertions && assertionResponse.assertions.length > 0) {
-                    for (const ass of assertionResponse.assertions)
-                      mapRefsToIdentifiers(ass, afterRefs);
-                    console.log(
-                      `[Agent][Asserter] Executing generated assertions...`,
-                    );
-                    const { passed, failures } = await evaluateAssertions(
-                      assertionResponse.assertions,
-                      browser,
-                      afterRefs,
-                    );
-                    assertionResponse.assertions = passed;
-
-                    if (failures.length > 0) {
-                      console.error(
-                        `[Agent][Asserter] Assertions FAILED: ${failures.join("\n")}`,
-                      );
-                      assertionHistory.push({
-                        role: "assistant",
-                        content: [
-                          { type: "text", text: JSON.stringify(assertionResponse) },
-                        ],
-                      });
-                      assertionHistory.push({
-                        role: "user",
-                        content: [
-                          {
-                            type: "text",
-                            text: `The assertions you generated failed programmatic verification: ${failures.join("\n")}. Please generate different assertions that correctly reflect the actual task completion state.`,
-                          },
-                        ],
-                      });
-                      assertionRetries++;
-                      continue;
-                    }
-                  }
-                  break;
-                } catch (reformatErr: any) {
-                  console.error(`[Agent][Asserter] Reformatter agent failed:`, reformatErr);
-                }
-              }
-            }
-            const rawResponse = e.text || e.cause?.text || e.response?.text;
-            console.log(`[Agent][Asserter] Raw response:`, rawResponse);
-
+            return res;
+          },
+          onMaxRetriesExceeded: async (e) => {
             const currentIssues =
               serializer?.getTest()?.issues || checklist.issues || [];
             const issuesSummary = currentIssues
@@ -891,7 +720,7 @@ export async function runAgent(
 
             console.error(`[Agent][Asserter] Error occurred. Input token size breakdown:`, tokenBreakdown);
 
-            if (assertionRetries >= 3 && artifactsDir) {
+            if (artifactsDir) {
               await saveAgentErrorReport(
                 artifactsDir,
                 {
@@ -907,24 +736,14 @@ export async function runAgent(
                   refs: afterRefs,
                   checklist,
                   llmPrompt: assertionPromptTemplate,
-                  llmRawResponse: e.text,
+                  llmRawResponse: e.text || e.cause?.text || e.response?.text,
                   tokenBreakdown,
                 },
                 browser,
               );
             }
-
-            assertionHistory.push({
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}\n\nPlease corrective-output a valid object.`,
-                },
-              ],
-            });
           }
-        }
+        });
 
         if (!assertionResponse)
           throw new Error("Failed to verify task after 3 attempts.");

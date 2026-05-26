@@ -196,17 +196,19 @@ export async function reformatJsonWithAgent<T>(params: {
 }): Promise<T> {
   console.log(`[Agent][Reformatter] Attempting to reformat invalid JSON with dedicated reformatter agent...`);
 
-  const result = await generateObject({
-    model: params.model,
-    schema: params.schema,
-    system: `You are a dedicated JSON repair/reformatting assistant. 
+  try {
+    const result = await generateObject({
+      model: params.model,
+      schema: params.schema,
+      system: `You are a dedicated JSON repair/reformatting assistant. 
 Your sole task is to take a raw text response that failed Zod validation and repair/reformat it to strictly conform to the expected JSON schema.
 Ensure all missing fields are added (with default/reasonable values based on context if needed), invalid formats/types are corrected, and enum constraints are strictly met.
+If you encounter an array, make sure all array elements are valid and has same type as schema.
 Keep the original semantics, tasks, reasoning, and descriptions from the invalid JSON intact where possible.`,
-    messages: [
-      {
-        role: "user",
-        content: `The following raw output failed validation against the schema:
+      messages: [
+        {
+          role: "user",
+          content: `The following raw output failed validation against the schema:
 \`\`\`
 ${params.rawResponse}
 \`\`\`
@@ -215,9 +217,200 @@ Validation errors encountered:
 ${params.errors}
 
 Please correct the JSON completely so that it matches the schema exactly and passes all validation checks.`,
-      },
-    ],
-  });
+        },
+      ],
+    });
 
-  return result.object;
+    return result.object;
+  } catch (e: any) {
+    console.warn(`[Agent][Reformatter] generateObject threw an error:`, e.message);
+    const reformattedRaw = e.text || e.cause?.text || e.response?.text;
+    if (reformattedRaw) {
+      const extractedStr = extractJsonFromMarkdown(reformattedRaw);
+      const parsedExtracted = extractedStr ? tryParseJson(extractedStr) : tryParseJson(reformattedRaw);
+      if (parsedExtracted) {
+        const validation = params.schema.safeParse(parsedExtracted);
+        if (validation.success) {
+          console.log(`[Agent][Reformatter] Successfully extracted and validated JSON from reformatter markdown response!`);
+          return validation.data;
+        } else {
+          console.error(`[Agent][Reformatter] Validation failed on reformatted extracted JSON:`, validation.error.message);
+        }
+      }
+    }
+    throw e;
+  }
 }
+
+function tryParseJson(str: string): any {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonFromMarkdown(str: string): string | null {
+  // 1. Try to extract from ```json ... ``` or ``` ... ``` code blocks
+  const jsonBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
+  const match = str.match(jsonBlockRegex);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+
+  // 2. Fallback: Find the first '{' and last '}' or first '[' and last ']' to extract JSON when explaining
+  const firstBrace = str.indexOf("{");
+  const lastBrace = str.lastIndexOf("}");
+  const firstBracket = str.indexOf("[");
+  const lastBracket = str.lastIndexOf("]");
+
+  let startIndex = -1;
+  let endIndex = -1;
+
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    if (firstBracket !== -1 && lastBracket !== -1) {
+      // Both exist, choose the outermost wrapper
+      startIndex = Math.min(firstBrace, firstBracket);
+      endIndex = Math.max(lastBrace, lastBracket);
+    } else {
+      startIndex = firstBrace;
+      endIndex = lastBrace;
+    }
+  } else if (firstBracket !== -1 && lastBracket !== -1) {
+    startIndex = firstBracket;
+    endIndex = lastBracket;
+  }
+
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    return str.substring(startIndex, endIndex + 1).trim();
+  }
+
+  return null;
+}
+
+export async function runWithSchemaRecovery<T>(params: {
+  model: LanguageModel;
+  schema: z.ZodSchema<T>;
+  taskFn: () => Promise<T>;
+  history: AgentHistoryMessage[];
+  maxRetries?: number;
+  label?: string;
+  onMaxRetriesExceeded?: (error: any) => Promise<void> | void;
+}): Promise<T> {
+  const maxRetries = params.maxRetries ?? 3;
+  let retries = 0;
+
+  while (retries < maxRetries) {
+    try {
+      return await params.taskFn();
+    } catch (e: any) {
+      retries++;
+      let errorMessage = e.message;
+      const details = extractSchemaErrors(e);
+      if (details) {
+        errorMessage = details;
+      }
+
+      const rawResponse = e.text || e.cause?.text || e.response?.text;
+      let isParsedSuccess = false;
+      let recoveredObj: T | null = null;
+      let notJsonMessage = false;
+
+      if (rawResponse) {
+        // 1. Check if response is JSON
+        const parsedDirect = tryParseJson(rawResponse);
+        if (parsedDirect) {
+          // 3. if is JSON, try to use reformat agent
+          if (details) {
+            try {
+              recoveredObj = await reformatJsonWithAgent({
+                model: params.model,
+                schema: params.schema,
+                rawResponse,
+                errors: details,
+              });
+              isParsedSuccess = true;
+            } catch (reformatErr: any) {
+              console.error(`[Agent][${params.label ?? "Helper"}] Reformatter agent failed:`, reformatErr);
+            }
+          }
+        } else {
+          // 2. if is not JSON, try to parse from markdown code block eg ```json...
+          const extractedStr = extractJsonFromMarkdown(rawResponse);
+          const parsedExtracted = extractedStr ? tryParseJson(extractedStr) : null;
+
+          if (parsedExtracted) {
+            // 2.a if parsing succeeds, validate using the schema
+            const validation = params.schema.safeParse(parsedExtracted);
+            if (validation.success) {
+              // 2.a.1 if validation succeeds, return the recovered json as a success
+              console.log(`[Agent][${params.label ?? "Helper"}] Successfully extracted and validated JSON from markdown block!`);
+              return validation.data;
+            } else {
+              // 2.a.2 if validation fails, try to use reformat agent (step 3)
+              const localDetails = extractSchemaErrors(validation.error);
+              console.log(`[Agent][${params.label ?? "Helper"}] Recovered JSON parse error details:`, localDetails);
+              if (localDetails) {
+                errorMessage = localDetails;
+                try {
+                  recoveredObj = await reformatJsonWithAgent({
+                    model: params.model,
+                    schema: params.schema,
+                    rawResponse: extractedStr!,
+                    errors: localDetails,
+                  });
+                  isParsedSuccess = true;
+                } catch (reformatErr: any) {
+                  console.error(`[Agent][${params.label ?? "Helper"}] Reformatter agent failed on extracted markdown JSON:`, reformatErr);
+                }
+              }
+            }
+          } else {
+            // 2.b if parsing fails, add message to history for agent to return valid json
+            notJsonMessage = true;
+            errorMessage = "Your previous response was not a valid JSON. Please ensure your output is strictly a valid JSON object matching the schema, with no surrounding text or markdown formatting.";
+          }
+        }
+      }
+
+      if (isParsedSuccess && recoveredObj) {
+        console.log(`[Agent][${params.label ?? "Helper"}] Successfully recovered invalid JSON using reformatter agent!`);
+        return recoveredObj;
+      }
+
+      console.log(`[Agent][${params.label ?? "Helper"}] Raw response:`, rawResponse);
+
+      params.history.push({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: rawResponse || JSON.stringify({ error: errorMessage }),
+          },
+        ],
+      });
+      params.history.push({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: notJsonMessage
+              ? errorMessage
+              : `Your previous response failed schema validation.\n\nERROR:\n${errorMessage}`,
+          },
+        ],
+      });
+
+      if (retries >= maxRetries) {
+        if (params.onMaxRetriesExceeded) {
+          await params.onMaxRetriesExceeded(e);
+        }
+        throw e;
+      }
+    }
+  }
+
+  throw new Error(`[Agent][${params.label ?? "Helper"}] Failed to execute task after ${maxRetries} attempts.`);
+}
+
+

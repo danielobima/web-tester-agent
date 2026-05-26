@@ -35,7 +35,9 @@
 ☐ Implement a wait command - Test
 ☐ Add autocomplete for website urls
 ☐ Fix execution retry not working
-☐ New agent approach: Send screenshot first, then agent searches the snapshot instead of passing the whole snapshot. This could potentially reduce context window usage.
+☐ Add Intelligence model in settings to read as add LLM, simple language
+☐ Better Logs: I want to be able to see all prompts and all outputs from the LLM throughout the process
+✔ New agent approach: Send screenshot first, then agent searches the snapshot instead of passing the whole snapshot. This could potentially reduce context window usage. @done(26-05-26 12:34)
 ✔ Add model selection in the frontend @done(26-05-12 12:15)
 ✔ Should be able to run replay in the test details page @done(26-05-12 12:15)
 ✔ In smaller screens the model card overlaps the execution stream @done(26-04-14 15:36)
