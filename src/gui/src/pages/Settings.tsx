@@ -84,9 +84,11 @@ export const Settings = () => {
 
   const handleRemoveModel = (id: string) => {
     if (!config) return;
+    const newModels = config.models.filter(m => m.id !== id);
     const updatedConfig = {
       ...config,
-      models: config.models.filter(m => m.id !== id)
+      models: newModels,
+      defaultModelId: config.defaultModelId === id ? (newModels[0]?.id || "") : config.defaultModelId
     };
     handleSave(updatedConfig);
   };

@@ -3,7 +3,6 @@ import type { TestStep } from "./components/features/ExecutionStream";
 declare global {
   interface Window {
     electron: {
-      startTest: (url: string, requirement: string) => void;
       stopTest: () => void;
       approvePlan: (result: { action: 'accept' | 'modify' | 'reject', checklist?: any }) => void;
       replayTest: (suitePath?: string) => void;

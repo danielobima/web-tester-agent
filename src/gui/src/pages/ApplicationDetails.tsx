@@ -28,6 +28,7 @@ export const ApplicationDetails = () => {
   const [isCreating, setIsCreating] = useState(false);
   
   const [models, setModels] = useState<any[]>([]);
+  const [defaultModelId, setDefaultModelId] = useState("");
   
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
@@ -47,7 +48,13 @@ export const ApplicationDetails = () => {
 
       const config = await window.electron.getConfig();
       setModels(config.models);
-      setNewModel(config.defaultModelId || config.models[0]?.id || "");
+      setDefaultModelId(config.defaultModelId || "");
+      
+      const defaultModelExists = config.models.some((m: any) => m.id === config.defaultModelId);
+      const initialModel = defaultModelExists 
+        ? config.defaultModelId 
+        : (config.models[0]?.id || "");
+      setNewModel(initialModel);
     } catch (error) {
       console.error("Error loading application details:", error);
     } finally {
@@ -109,7 +116,11 @@ export const ApplicationDetails = () => {
         <div className="flex items-center justify-between mb-8">
            <h2 className="text-xl font-bold text-on-surface/60">Tests ({tests.length})</h2>
            <button 
-             onClick={() => setIsCreating(true)}
+             onClick={() => {
+               const defaultModelExists = models.some((m: any) => m.id === defaultModelId);
+               setNewModel(defaultModelExists ? defaultModelId : (models[0]?.id || ""));
+               setIsCreating(true);
+             }}
              className="bg-primary text-white px-6 py-3 rounded-md font-bold text-sm shadow-premium hover:opacity-90 transition-all flex items-center gap-2"
            >
              <Icons.Plus /> New Test

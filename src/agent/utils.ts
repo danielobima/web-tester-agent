@@ -4,6 +4,8 @@ import { type Checklist } from "../actions";
 import { type TokenBreakdown } from "../error_logger";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { ZodError } from "zod";
+import { fromError } from "zod-validation-error";
 
 export function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   if (!obj) return;
@@ -144,43 +146,42 @@ export function getTokenBreakdown(params: {
 export function extractSchemaErrors(e: any): string | null {
   if (!e) return null;
 
-  const formatZodIssues = (issues: any[]): string => {
-    return issues
-      .map((err: any) => {
-        const pathStr = Array.isArray(err?.path) ? err.path.join(".") : "unknown";
-        const messageStr = err?.message || "Invalid value";
-        return `- ${pathStr}: ${messageStr}`;
-      })
-      .join("\n");
+  // Helper to find a ZodError or issues array in the error structure
+  const findZodErrorOrIssues = (err: any): ZodError | any[] | null => {
+    if (err instanceof ZodError || (err && typeof err === "object" && err.constructor?.name === "ZodError")) {
+      return err;
+    }
+    if (err && typeof err === "object") {
+      if (Array.isArray(err.errors)) return err.errors;
+      if (Array.isArray(err.issues)) return err.issues;
+      if (err.cause) {
+        const nested = findZodErrorOrIssues(err.cause);
+        if (nested) return nested;
+      }
+    }
+    return null;
   };
 
-  if (e.errors && Array.isArray(e.errors)) {
-    return formatZodIssues(e.errors);
+  const resolved = findZodErrorOrIssues(e);
+  if (!resolved) {
+    return null;
   }
 
-  if (e.cause?.errors && Array.isArray(e.cause.errors)) {
-    return formatZodIssues(e.cause.errors);
-  }
+  try {
+    let zodError: ZodError;
+    if (Array.isArray(resolved)) {
+      zodError = new ZodError(resolved);
+    } else {
+      zodError = resolved;
+    }
 
-  const causeCause = e.cause?.cause;
-  if (causeCause) {
-    if (Array.isArray(causeCause)) {
-      return formatZodIssues(causeCause);
-    }
-    if (causeCause.errors && Array.isArray(causeCause.errors)) {
-      return formatZodIssues(causeCause.errors);
-    }
-    if (causeCause.issues && Array.isArray(causeCause.issues)) {
-      return formatZodIssues(causeCause.issues);
-    }
+    return fromError(zodError, {
+      prefix: "The JSON structure you generated failed validation with the following errors:",
+      issueSeparator: "; ",
+      unionSeparator: " OR ",
+    }).toString();
+  } catch (err) {
+    console.error("Error formatting Zod error:", err);
+    return null;
   }
-
-  const cause = e.cause;
-  if (cause) {
-    if (cause.issues && Array.isArray(cause.issues)) {
-      return formatZodIssues(cause.issues);
-    }
-  }
-
-  return null;
 }

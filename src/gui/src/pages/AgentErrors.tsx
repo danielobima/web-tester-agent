@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Icons } from "../components/ui/Icons";
-import { MarkdownRenderer } from "../components/ui/MarkdownRenderer";
 
 interface ErrorSummary {
   id: string;

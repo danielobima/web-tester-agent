@@ -127,7 +127,7 @@ export const Carousel = ({ steps, activeIndex, onClose, onNavigate }: CarouselPr
                    <ul className="space-y-1.5">
                       {currentStep.issues.map((issue, idx) => (
                         <li key={idx} className="text-white/70 text-xs font-medium leading-relaxed border-l border-orange-500/30 pl-2">
-                          {issue}
+                          {issue.description} <span className="text-[10px] opacity-40 uppercase font-mono pl-1">({issue.severity})</span>
                         </li>
                       ))}
                    </ul>

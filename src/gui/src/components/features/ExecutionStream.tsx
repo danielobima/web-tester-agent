@@ -14,6 +14,8 @@ export interface TestStep {
   screenshot?: string;
   action?: any;
   issues?: { description: string; severity: string }[];
+  url?: string;
+  usability?: string[];
 }
 
 interface ExecutionStreamProps {

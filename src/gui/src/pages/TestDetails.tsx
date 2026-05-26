@@ -41,10 +41,19 @@ export const TestDetails = () => {
       setEditName(testData.name);
       setEditUrl(testData.url);
       setEditRequirement(testData.requirement);
-      setEditModel(testData.model);
 
       const config = await window.electron.getConfig();
       setModels(config.models);
+
+      const modelExists = config.models.some((m: any) => m.id === testData.model);
+      if (modelExists) {
+        setEditModel(testData.model);
+      } else if (config.models.length > 0) {
+        const defaultModelExists = config.models.some((m: any) => m.id === config.defaultModelId);
+        setEditModel(defaultModelExists ? config.defaultModelId : config.models[0].id);
+      } else {
+        setEditModel("");
+      }
     } catch (error) {
       console.error("Error loading test details:", error);
     } finally {

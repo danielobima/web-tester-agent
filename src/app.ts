@@ -110,6 +110,9 @@ app.whenReady().then(async () => {
     const artifactsDir = app.getPath("userData");
     const config = await data.getConfig();
     const modelConfig = config.models.find(m => m.id === model) || config.models[0];
+    if (!modelConfig) {
+      throw new Error("No intelligence models are configured. Please go to Settings and add at least one AI model before running tests.");
+    }
     const aiModel = createModel(modelConfig);
     const modelSupportsVision = config.visualFirst && isVisionModel(modelConfig.provider, modelConfig.modelName, modelConfig.supportsVision);
 
@@ -266,6 +269,9 @@ app.whenReady().then(async () => {
     
     const config = await data.getConfig();
     const modelConfig = config.models.find(m => m.id === config.defaultModelId) || config.models[0];
+    if (!modelConfig) {
+      throw new Error("No intelligence models are configured. Please go to Settings and add at least one AI model before running tests.");
+    }
     const aiModel = createModel(modelConfig);
     const modelSupportsVision = config.visualFirst && isVisionModel(modelConfig.provider, modelConfig.modelName, modelConfig.supportsVision);
 
