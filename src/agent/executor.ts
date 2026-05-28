@@ -2,7 +2,7 @@ import { generateObject, type LanguageModel } from "ai";
 import { type AgentHistoryMessage } from "./types";
 import { ExecutionResponseSchema, type Checklist, type ExecutionResponse } from "../actions";
 import { TestSerializer } from "../recorder";
-import { prepareImagePart } from "../utils";
+import { prepareImagePart, getProviderOptions } from "../utils";
 
 export async function executeTask(params: {
   model: LanguageModel;
@@ -42,6 +42,7 @@ export async function executeTask(params: {
     model: params.model,
     schema: ExecutionResponseSchema,
     system: executionPrompt,
+    providerOptions: getProviderOptions(params.model),
     messages: [
       ...params.history,
       {

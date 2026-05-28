@@ -3,6 +3,7 @@ import { BrowserManager } from "./browser";
 import { ActionSchema, Action, Assertion } from "./actions";
 import { TestSerializer, TestStep } from "./recorder";
 import * as path from "path";
+import { getProviderOptions } from "./utils";
 
 export async function evaluateAssertions(
   assertions: Assertion[],
@@ -197,6 +198,7 @@ async function heal(
     model: model,
     schema: ActionSchema,
     system: systemPrompt,
+    providerOptions: getProviderOptions(model),
     messages: [
       {
         role: "user",

@@ -7,6 +7,7 @@ import * as path from "path";
 import { ZodError, z } from "zod";
 import { fromError } from "zod-validation-error";
 import { generateObject, type LanguageModel } from "ai";
+import { getProviderOptions } from "../utils";
 
 export function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   if (!obj) return;
@@ -205,6 +206,7 @@ Your sole task is to take a raw text response that failed Zod validation and rep
 Ensure all missing fields are added (with default/reasonable values based on context if needed), invalid formats/types are corrected, and enum constraints are strictly met.
 If you encounter an array, make sure all array elements are valid and has same type as schema.
 Keep the original semantics, tasks, reasoning, and descriptions from the invalid JSON intact where possible.`,
+      providerOptions: getProviderOptions(params.model),
       messages: [
         {
           role: "user",

@@ -1,7 +1,7 @@
 import { generateObject, type LanguageModel } from "ai";
 import { type AgentHistoryMessage } from "./types";
 import { ChecklistSchema, type Checklist } from "../actions";
-import { prepareImagePart } from "../utils";
+import { prepareImagePart, getProviderOptions } from "../utils";
 
 export async function planTask(params: {
   model: LanguageModel;
@@ -19,6 +19,7 @@ export async function planTask(params: {
     model: params.model,
     schema: ChecklistSchema,
     system: params.planningPrompt,
+    providerOptions: getProviderOptions(params.model),
     messages: [
       ...params.history,
       {

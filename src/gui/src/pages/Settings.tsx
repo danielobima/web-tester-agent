@@ -9,6 +9,7 @@ interface ModelConfig {
   apiKey?: string;
   baseUrl?: string;
   supportsVision?: boolean;
+  ollamaThink?: boolean;
 }
 
 interface AppConfig {
@@ -23,6 +24,7 @@ export const Settings = () => {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
 
   // New model state
   const [newModel, setNewModel] = useState<Partial<ModelConfig>>({
@@ -31,7 +33,8 @@ export const Settings = () => {
     modelName: "",
     apiKey: "",
     baseUrl: "",
-    supportsVision: false
+    supportsVision: false,
+    ollamaThink: true
   });
 
   useEffect(() => {
@@ -59,17 +62,61 @@ export const Settings = () => {
     }
   };
 
-  const handleAddModel = () => {
-    if (!config) return;
-    const modelToAdd = {
-      ...newModel,
-      id: `model-${Date.now()}`
-    } as ModelConfig;
+  const handleStartEdit = (model: ModelConfig) => {
+    setNewModel({
+      name: model.name,
+      provider: model.provider,
+      modelName: model.modelName,
+      apiKey: model.apiKey || "",
+      baseUrl: model.baseUrl || "",
+      supportsVision: model.supportsVision || false,
+      ollamaThink: model.ollamaThink !== false
+    });
+    setEditingModelId(model.id);
+    setShowAddModal(true);
+  };
 
-    const updatedConfig = {
-      ...config,
-      models: [...config.models, modelToAdd]
-    };
+  const handleCloseModal = () => {
+    setShowAddModal(false);
+    setEditingModelId(null);
+    setNewModel({
+      name: "",
+      provider: "google",
+      modelName: "",
+      apiKey: "",
+      baseUrl: "",
+      supportsVision: false,
+      ollamaThink: true
+    });
+  };
+
+  const handleSaveModel = () => {
+    if (!config) return;
+
+    let updatedConfig: AppConfig;
+    if (editingModelId) {
+      const updatedModels = config.models.map(m => 
+        m.id === editingModelId 
+          ? { ...newModel, id: editingModelId } as ModelConfig 
+          : m
+      );
+      updatedConfig = {
+        ...config,
+        models: updatedModels
+      };
+      setEditingModelId(null);
+    } else {
+      const modelToAdd = {
+        ...newModel,
+        id: `model-${Date.now()}`
+      } as ModelConfig;
+
+      updatedConfig = {
+        ...config,
+        models: [...config.models, modelToAdd]
+      };
+    }
+
     handleSave(updatedConfig);
     setShowAddModal(false);
     setNewModel({
@@ -78,7 +125,8 @@ export const Settings = () => {
       modelName: "",
       apiKey: "",
       baseUrl: "",
-      supportsVision: false
+      supportsVision: false,
+      ollamaThink: true
     });
   };
 
@@ -126,7 +174,10 @@ export const Settings = () => {
                 <p className="text-sm text-on-surface/40">Models available for test execution</p>
               </div>
               <button 
-                onClick={() => setShowAddModal(true)}
+                onClick={() => {
+                  setEditingModelId(null);
+                  setShowAddModal(true);
+                }}
                 className="bg-primary text-white px-4 py-2 rounded-lg font-bold text-sm shadow-premium hover:opacity-90 transition-all flex items-center gap-2"
               >
                 <Icons.Plus /> Add Model
@@ -154,6 +205,15 @@ export const Settings = () => {
                         {model.supportsVision && (
                           <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Vision</span>
                         )}
+                        {model.provider === 'ollama' && (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider ${
+                            model.ollamaThink !== false 
+                              ? 'bg-amber-500/10 text-amber-500' 
+                              : 'bg-on-surface/5 text-on-surface/40'
+                          }`}>
+                            {model.ollamaThink !== false ? 'Thinking' : 'No Thinking'}
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-on-surface/40 font-mono">{model.modelName} ({model.provider})</p>
                     </div>
@@ -169,8 +229,16 @@ export const Settings = () => {
                       </button>
                     )}
                     <button 
+                      onClick={() => handleStartEdit(model)}
+                      className="p-2 text-on-surface/20 hover:text-primary transition-colors"
+                      title="Edit Model"
+                    >
+                      <Icons.Edit />
+                    </button>
+                    <button 
                       onClick={() => handleRemoveModel(model.id)}
                       className="p-2 text-on-surface/20 hover:text-red-500 transition-colors"
+                      title="Remove Model"
                     >
                       <Icons.Trash />
                     </button>
@@ -240,11 +308,15 @@ export const Settings = () => {
       {/* Add Model Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-surface-lowest/80 backdrop-blur-md" onClick={() => setShowAddModal(false)} />
+          <div className="absolute inset-0 bg-surface-lowest/80 backdrop-blur-md" onClick={handleCloseModal} />
           <div className="relative w-full max-w-xl bg-surface-low border border-on-surface/10 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden">
             <div className="p-8 border-b border-on-surface/5">
-              <h2 className="text-2xl font-bold font-display tracking-tight">Add Intelligence Model</h2>
-              <p className="text-on-surface/40 text-sm mt-1">Connect a new provider or local inference engine</p>
+              <h2 className="text-2xl font-bold font-display tracking-tight">
+                {editingModelId ? "Edit Intelligence Model" : "Add Intelligence Model"}
+              </h2>
+              <p className="text-on-surface/40 text-sm mt-1">
+                {editingModelId ? "Update your model configuration parameters" : "Connect a new provider or local inference engine"}
+              </p>
             </div>
             
             <div className="p-8 space-y-6">
@@ -296,15 +368,30 @@ export const Settings = () => {
               </div>
 
               {newModel.provider === 'ollama' && (
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Base URL</label>
-                  <input 
-                    value={newModel.baseUrl}
-                    onChange={e => setNewModel({...newModel, baseUrl: e.target.value})}
-                    placeholder="http://localhost:11434/api"
-                    className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm"
-                  />
-                </div>
+                <>
+                  <div className="flex items-center justify-between bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3">
+                    <div>
+                      <h4 className="font-bold text-sm text-on-surface">Enable Thinking / Reasoning</h4>
+                      <p className="text-xs text-on-surface/40">Keep this active for reasoning models like DeepSeek-R1</p>
+                    </div>
+                    <button 
+                      onClick={() => setNewModel({...newModel, ollamaThink: !newModel.ollamaThink})}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${newModel.ollamaThink !== false ? 'bg-primary' : 'bg-on-surface/10'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${newModel.ollamaThink !== false ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Base URL</label>
+                    <input 
+                      value={newModel.baseUrl}
+                      onChange={e => setNewModel({...newModel, baseUrl: e.target.value})}
+                      placeholder="http://localhost:11434/api"
+                      className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm"
+                    />
+                  </div>
+                </>
               )}
 
               {newModel.provider === 'openai' && (
@@ -333,17 +420,17 @@ export const Settings = () => {
 
               <div className="flex gap-4 pt-4">
                 <button 
-                  onClick={() => setShowAddModal(false)}
+                  onClick={handleCloseModal}
                   className="flex-1 px-6 py-3 rounded-lg font-bold text-sm text-on-surface/60 hover:bg-on-surface/5 transition-colors"
                 >
                   Cancel
                 </button>
                 <button 
-                  onClick={handleAddModel}
+                  onClick={handleSaveModel}
                   disabled={!newModel.name || !newModel.modelName}
                   className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-bold text-sm shadow-premium hover:opacity-90 transition-all disabled:opacity-50"
                 >
-                  Add Model
+                  {editingModelId ? "Save Model" : "Add Model"}
                 </button>
               </div>
             </div>

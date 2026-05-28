@@ -6,7 +6,7 @@ import * as path from "path";
 import { z } from "zod";
 import { evaluateAssertions } from "./replay";
 import { saveAgentErrorReport } from "./error_logger";
-import { prepareImagePart } from "./utils";
+import { prepareImagePart, getProviderOptions } from "./utils";
 
 import {
   AgentHistoryMessage,
@@ -621,129 +621,142 @@ export async function runAgent(
         const verificationStartTime = Date.now();
         const assertionHistory: any[] = [];
 
-        let assertionResponse = await runWithSchemaRecovery({
-          model,
-          schema: AssertionAgentResponseSchema,
-          label: "Asserter",
-          history: assertionHistory,
-          taskFn: async () => {
-            const currentIssues =
-              serializer?.getTest()?.issues || checklist.issues || [];
-            const issuesSummary = currentIssues
-              .map((i) => `${i.id}: ${i.description}`)
-              .join("; ");
+        let assertionResponse;
+        try {
+          assertionResponse = await runWithSchemaRecovery({
+            model,
+            schema: AssertionAgentResponseSchema,
+            label: "Asserter",
+            history: assertionHistory,
+            taskFn: async () => {
+              const currentIssues =
+                serializer?.getTest()?.issues || checklist.issues || [];
+              const issuesSummary = currentIssues
+                .map((i) => `${i.id}: ${i.description}`)
+                .join("; ");
 
-            const assertionResult = await generateObject({
-              model,
-              schema: AssertionAgentResponseSchema,
-              system: assertionPromptTemplate,
-              messages: [
-                {
-                  role: "user" as const,
-                  content: [
-                    {
-                      type: "text" as const,
-                      text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`,
-                    },
-                    ...(currentTaskBeforeScreenshot && supportsVision
-                      ? [prepareImagePart(currentTaskBeforeScreenshot)]
-                      : []),
-                    ...(afterActionScreenshot && supportsVision
-                      ? [prepareImagePart(afterActionScreenshot)]
-                      : []),
-                  ],
-                },
-                ...assertionHistory,
-              ],
-            });
-            const res = assertionResult.object;
+              const assertionResult = await generateObject({
+                model,
+                schema: AssertionAgentResponseSchema,
+                system: assertionPromptTemplate,
+                providerOptions: getProviderOptions(model),
+                messages: [
+                  {
+                    role: "user" as const,
+                    content: [
+                      {
+                        type: "text" as const,
+                        text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`,
+                      },
+                      ...(currentTaskBeforeScreenshot && supportsVision
+                        ? [prepareImagePart(currentTaskBeforeScreenshot)]
+                        : []),
+                      ...(afterActionScreenshot && supportsVision
+                        ? [prepareImagePart(afterActionScreenshot)]
+                        : []),
+                    ],
+                  },
+                  ...assertionHistory,
+                ],
+              });
+              const res = assertionResult.object;
 
-            if (res && res.assertions && res.assertions.length > 0) {
-              for (const ass of res.assertions)
-                mapRefsToIdentifiers(ass, afterRefs);
-              console.log(
-                `[Agent][Asserter] Executing generated assertions...`,
-              );
-              const { passed, failures } = await evaluateAssertions(
-                res.assertions,
-                browser,
-                afterRefs,
-              );
-              res.assertions = passed;
+              if (res && res.assertions && res.assertions.length > 0) {
+                for (const ass of res.assertions)
+                  mapRefsToIdentifiers(ass, afterRefs);
+                console.log(
+                  `[Agent][Asserter] Executing generated assertions...`,
+                );
+                const { passed, failures } = await evaluateAssertions(
+                  res.assertions,
+                  browser,
+                  afterRefs,
+                );
+                res.assertions = passed;
 
-              if (failures.length > 0) {
-                throw new Error(`The assertions you generated failed programmatic verification: ${failures.join("\n")}`);
+                if (failures.length > 0) {
+                  throw new Error(`The assertions you generated failed programmatic verification: ${failures.join("\n")}`);
+                }
+              }
+              return res;
+            },
+            onMaxRetriesExceeded: async (e) => {
+              const currentIssues =
+                serializer?.getTest()?.issues || checklist.issues || [];
+              const issuesSummary = currentIssues
+                .map((i) => `${i.id}: ${i.description}`)
+                .join("; ");
+              const latestUserText = `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`;
+
+              const systemPromptTokens = estimateTextTokens(assertionPromptTemplate);
+              const historyTokens = assertionHistory.reduce((sum: number, msg: any) => {
+                if (typeof msg.content === "string") {
+                  return sum + estimateTextTokens(msg.content);
+                } else if (Array.isArray(msg.content)) {
+                  return sum + msg.content.reduce((innerSum: number, part: any) => {
+                    if (part.type === "text") {
+                      return innerSum + estimateTextTokens(part.text);
+                    } else if (part.type === "image") {
+                      return innerSum + estimateImageTokens(part.image);
+                    }
+                    return innerSum;
+                  }, 0);
+                }
+                return sum;
+              }, 0);
+
+              const latestUserTextTokens = estimateTextTokens(latestUserText);
+
+              let imageTokens = 0;
+              if (currentTaskBeforeScreenshot && supportsVision) imageTokens += estimateImageTokens(currentTaskBeforeScreenshot);
+              if (afterActionScreenshot && supportsVision) imageTokens += estimateImageTokens(afterActionScreenshot);
+
+              const totalTokens = systemPromptTokens + historyTokens + latestUserTextTokens + imageTokens;
+
+              const tokenBreakdown = {
+                systemPromptTokens,
+                historyTokens,
+                latestUserTextTokens,
+                imageTokens,
+                totalTokens,
+              };
+
+              console.error(`[Agent][Asserter] Error occurred. Input token size breakdown:`, tokenBreakdown);
+
+              if (artifactsDir) {
+                await saveAgentErrorReport(
+                  artifactsDir,
+                  {
+                    error: e,
+                    type: "verification",
+                    step: stepCounter,
+                    requirement,
+                    url: browser.page?.url() || currentUrl,
+                    taskId: currentTaskId,
+                    taskDescription: currentTask.description,
+                    history: [...history],
+                    snapshot: afterSnapshot,
+                    refs: afterRefs,
+                    checklist,
+                    llmPrompt: assertionPromptTemplate,
+                    llmRawResponse: e.text || e.cause?.text || e.response?.text,
+                    tokenBreakdown,
+                  },
+                  browser,
+                );
               }
             }
-            return res;
-          },
-          onMaxRetriesExceeded: async (e) => {
-            const currentIssues =
-              serializer?.getTest()?.issues || checklist.issues || [];
-            const issuesSummary = currentIssues
-              .map((i) => `${i.id}: ${i.description}`)
-              .join("; ");
-            const latestUserText = `Task: ${currentTask.description}\nGoal: ${requirement}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nBEFORE Snapshot:\n${currentTaskBeforeSnapshot}\nAFTER Snapshot:\n${afterSnapshot}\n\nNetwork Logs:\n${JSON.stringify(browser.networkLogs, null, 2)}\n\nConsole Logs:\n${JSON.stringify(browser.consoleLogs, null, 2)}`;
-
-            const systemPromptTokens = estimateTextTokens(assertionPromptTemplate);
-            const historyTokens = assertionHistory.reduce((sum: number, msg: any) => {
-              if (typeof msg.content === "string") {
-                return sum + estimateTextTokens(msg.content);
-              } else if (Array.isArray(msg.content)) {
-                return sum + msg.content.reduce((innerSum: number, part: any) => {
-                  if (part.type === "text") {
-                    return innerSum + estimateTextTokens(part.text);
-                  } else if (part.type === "image") {
-                    return innerSum + estimateImageTokens(part.image);
-                  }
-                  return innerSum;
-                }, 0);
-              }
-              return sum;
-            }, 0);
-
-            const latestUserTextTokens = estimateTextTokens(latestUserText);
-
-            let imageTokens = 0;
-            if (currentTaskBeforeScreenshot && supportsVision) imageTokens += estimateImageTokens(currentTaskBeforeScreenshot);
-            if (afterActionScreenshot && supportsVision) imageTokens += estimateImageTokens(afterActionScreenshot);
-
-            const totalTokens = systemPromptTokens + historyTokens + latestUserTextTokens + imageTokens;
-
-            const tokenBreakdown = {
-              systemPromptTokens,
-              historyTokens,
-              latestUserTextTokens,
-              imageTokens,
-              totalTokens,
-            };
-
-            console.error(`[Agent][Asserter] Error occurred. Input token size breakdown:`, tokenBreakdown);
-
-            if (artifactsDir) {
-              await saveAgentErrorReport(
-                artifactsDir,
-                {
-                  error: e,
-                  type: "verification",
-                  step: stepCounter,
-                  requirement,
-                  url: browser.page?.url() || currentUrl,
-                  taskId: currentTaskId,
-                  taskDescription: currentTask.description,
-                  history: [...history],
-                  snapshot: afterSnapshot,
-                  refs: afterRefs,
-                  checklist,
-                  llmPrompt: assertionPromptTemplate,
-                  llmRawResponse: e.text || e.cause?.text || e.response?.text,
-                  tokenBreakdown,
-                },
-                browser,
-              );
-            }
-          }
-        });
+          });
+        } catch (error: any) {
+          console.warn(`[Agent][Asserter] ⚠️ Verification failed but continuing:`, error.message);
+          assertionResponse = {
+            currentStateDescription: "Failed to programmatically verify task completion.",
+            assertions: [],
+            isTaskVerified: false,
+            verificationReasoning: `Programmatic verification of assertions failed. Continuing anyway. Details: ${error.message}`,
+            issues: []
+          };
+        }
 
         if (!assertionResponse)
           throw new Error("Failed to verify task after 3 attempts.");

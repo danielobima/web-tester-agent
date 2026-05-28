@@ -67,3 +67,20 @@ export function prepareImagePart(image: Buffer | Uint8Array | string): {
     mediaType: "image/png",
   };
 }
+
+/**
+ * Helper to get providerOptions for generateObject based on the model's configuration.
+ */
+export function getProviderOptions(model: any): Record<string, any> | undefined {
+  if (model && model.agentConfig && model.agentConfig.provider === "ollama") {
+    if (model.agentConfig.ollamaThink !== undefined) {
+      return {
+        ollama: {
+          think: model.agentConfig.ollamaThink,
+        },
+      };
+    }
+  }
+  return undefined;
+}
+

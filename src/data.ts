@@ -28,6 +28,7 @@ export interface ModelConfig {
   apiKey?: string;
   baseUrl?: string;
   supportsVision?: boolean;
+  ollamaThink?: boolean;
 }
 
 export interface AppConfig {

@@ -34,11 +34,26 @@ async function main() {
     const modelArg = args.find((a) => a.startsWith("--model="));
     let modelName = modelArg ? modelArg.split("=")[1] : "";
 
+    const thinkArg = args.find((a) => a.startsWith("--think="));
+    let ollamaThink: boolean | undefined = undefined;
+    if (thinkArg) {
+      ollamaThink = thinkArg.split("=")[1] === "true";
+    } else if (args.includes("--nothink")) {
+      ollamaThink = false;
+    } else if (args.includes("--think")) {
+      ollamaThink = true;
+    }
+
     let model;
     if (provider === "ollama") {
       const ollama = createOllama();
       if (!modelName) modelName = "deepseek-r1:7b";
       model = ollama(modelName);
+      (model as any).agentConfig = {
+        provider: "ollama",
+        modelName,
+        ollamaThink: ollamaThink !== undefined ? ollamaThink : true,
+      };
     } else {
       if (!modelName) modelName = "gemini-3.1-flash-lite-preview";
       model = google(modelName);
@@ -55,7 +70,7 @@ async function main() {
       const isInteractive = args.includes("--interactive") || args.includes("-i");
       const isVisualFirst = args.includes("--visual-first");
       
-      const cleanArgs = args.filter(a => !["--no-artifacts", "--skip-assertions", "--full-snapshot", "--interactive", "-i", "--vision", "--visual-first"].includes(a) && !a.startsWith("--provider=") && !a.startsWith("--model="));
+      const cleanArgs = args.filter(a => !["--no-artifacts", "--skip-assertions", "--full-snapshot", "--interactive", "-i", "--vision", "--visual-first", "--think", "--nothink"].includes(a) && !a.startsWith("--provider=") && !a.startsWith("--model=") && !a.startsWith("--think="));
 
       const goal = cleanArgs[1];
       const startUrl = cleanArgs[2];

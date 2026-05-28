@@ -5,7 +5,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { evaluateAssertions } from "./replay";
 import { saveAgentErrorReport, type TokenBreakdown } from "./error_logger";
-import { prepareImagePart } from "./utils";
+import { prepareImagePart, getProviderOptions } from "./utils";
 
 import {
   AgentHistoryMessage,
@@ -562,85 +562,99 @@ export async function runVisualAgent(
       if (!skipAssertions && currentTask && executionResponse.isTaskComplete) {
         const assertionHistory: any[] = [];
 
-        const assertionResponse = await runWithSchemaRecovery({
-          model,
-          schema: AssertionAgentResponseSchema,
-          label: "Asserter",
-          history: assertionHistory,
-          taskFn: async () => {
-            console.log(`[VisualAgent][Asserter] Verifying task completion...`);
-            const assertionResult = await generateObject({
-              model,
-              schema: AssertionAgentResponseSchema,
-              system: assertionPromptTemplate,
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nBEFORE URL: ${currentTaskBeforeUrl}\nAFTER URL: ${currentUrl}\n\nConsole Logs: \n${logsText || "None"} \n\nNetwork Logs: \n${netText || "None"} `,
-                    },
-                    ...(currentTaskBeforeScreenshot && supportsVision
-                      ? [prepareImagePart(currentTaskBeforeScreenshot)]
-                      : []),
-                    ...(screenshot && supportsVision
-                      ? [prepareImagePart(screenshot)]
-                      : []),
-                  ],
-                },
-              ],
-            });
+        let assertionResponse;
+        try {
+          assertionResponse = await runWithSchemaRecovery({
+            model,
+            schema: AssertionAgentResponseSchema,
+            label: "Asserter",
+            history: assertionHistory,
+            taskFn: async () => {
+              console.log(`[VisualAgent][Asserter] Verifying task completion...`);
+              const assertionResult = await generateObject({
+                model,
+                schema: AssertionAgentResponseSchema,
+                system: assertionPromptTemplate,
+                providerOptions: getProviderOptions(model),
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: `Task: ${currentTask.description}\nGoal: ${requirement}\n\nBEFORE URL: ${currentTaskBeforeUrl}\nAFTER URL: ${currentUrl}\n\nConsole Logs: \n${logsText || "None"} \n\nNetwork Logs: \n${netText || "None"} `,
+                      },
+                      ...(currentTaskBeforeScreenshot && supportsVision
+                        ? [prepareImagePart(currentTaskBeforeScreenshot)]
+                        : []),
+                      ...(screenshot && supportsVision
+                        ? [prepareImagePart(screenshot)]
+                        : []),
+                    ],
+                  },
+                ],
+              });
 
-            const res = assertionResult.object;
-            console.log(`[VisualAgent][Asserter] Response: `, res);
+              const res = assertionResult.object;
+              console.log(`[VisualAgent][Asserter] Response: `, res);
 
-            if (
-              serializer &&
-              res.issues &&
-              res.issues.length > 0
-            ) {
-              serializer.logFindings(
-                `step - ${stepCounter} `,
-                res.issues,
-              );
-              if (onIssuesUpdate)
-                onIssuesUpdate(serializer.getTest()?.issues || []);
-            }
-
-            const afterAx = await browser.getSnapshotForLLM(
-              false,
-              false,
-              fullSnapshot,
-            );
-            const afterRefs = afterAx.refs;
-
-            if (
-              res.assertions &&
-              Array.isArray(res.assertions)
-            ) {
-              for (const ass of res.assertions) {
-                mapRefsToIdentifiers(ass, afterRefs);
+              if (
+                serializer &&
+                res.issues &&
+                res.issues.length > 0
+              ) {
+                serializer.logFindings(
+                  `step - ${stepCounter} `,
+                  res.issues,
+                );
+                if (onIssuesUpdate)
+                  onIssuesUpdate(serializer.getTest()?.issues || []);
               }
-              const { passed, failures } = await evaluateAssertions(
-                res.assertions,
-                browser,
-                afterRefs,
+
+              const afterAx = await browser.getSnapshotForLLM(
+                false,
+                false,
+                fullSnapshot,
               );
-              res.assertions = passed;
+              const afterRefs = afterAx.refs;
 
-              if (failures.length > 0) {
-                isVerified = false;
-                throw new Error(`The assertions you generated failed programmatic verification: ${failures.join("\n")}`);
+              if (
+                res.assertions &&
+                Array.isArray(res.assertions)
+              ) {
+                for (const ass of res.assertions) {
+                  mapRefsToIdentifiers(ass, afterRefs);
+                }
+                const { passed, failures } = await evaluateAssertions(
+                  res.assertions,
+                  browser,
+                  afterRefs,
+                );
+                res.assertions = passed;
+
+                if (failures.length > 0) {
+                  isVerified = false;
+                  throw new Error(`The assertions you generated failed programmatic verification: ${failures.join("\n")}`);
+                }
               }
-            }
 
-            return res;
-          },
-          onMaxRetriesExceeded: (e) => {
-            isVerified = false;
-          }
-        });
+              return res;
+            },
+            onMaxRetriesExceeded: (e) => {
+              isVerified = false;
+            }
+          });
+        } catch (error: any) {
+          console.warn(`[VisualAgent][Asserter] ⚠️ Verification failed but continuing:`, error.message);
+          isVerified = false;
+          assertionResponse = {
+            currentStateDescription: "Failed to programmatically verify task completion.",
+            assertions: [],
+            isTaskVerified: false,
+            verificationReasoning: `Programmatic verification of assertions failed. Continuing anyway. Details: ${error.message}`,
+            issues: []
+          };
+        }
 
         if (assertionResponse) {
           if (isVerified) {
