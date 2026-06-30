@@ -31,49 +31,42 @@
     ✔ Demonstrate how model efficiency can be increased by training using QLoRA and 4-bit quantization @done(26-05-25 12:38)
 ✔ Should be able to actually catch bugs, demo a test where there is a known defect @done(26-05-04 11:27)
 ✔ A systematic way to store agent errors, (No object generated, failed action execution etc) @done(26-05-12 12:31)
-☐ Fix tab not found error when an existing chrome window is open - Also unable to know which tab is active
-☐ Implement a wait command - Test
-☐ Add autocomplete for website urls
-☐ Fix execution retry not working
-☐ Add Intelligence model in settings to read as add LLM, simple language
-☐ Better Logs: I want to be able to see all prompts and all outputs from the LLM throughout the process
 ✔ New agent approach: Send screenshot first, then agent searches the snapshot instead of passing the whole snapshot. This could potentially reduce context window usage. @done(26-05-26 12:34)
 ✔ Add model selection in the frontend @done(26-05-12 12:15)
 ✔ Should be able to run replay in the test details page @done(26-05-12 12:15)
 ✔ In smaller screens the model card overlaps the execution stream @done(26-04-14 15:36)
 ✔ Should not show "successfully finished execution" text in the UI until after the user has approved @done(26-05-04 11:17)
 ✔ Enable running on headless mode - needs testing @done(26-05-13 11:55)
-☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
-☐ Scroll interaction - Only relevant for vision models - needs testing
-☐ Implement retry for the planning agent
 ✔ We dont have a screenshot of the final state in the report, only the screenshot of the state before the final step @done(26-05-13 12:58)
-☐ When testing negative cases "EG verify something is not..." the agent get lazy 
 ✔ Telling the user that the goal was acheived is a bit misleading if there were issues found, maybe we just say execution completed or something similar @done(26-05-13 12:55)
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
+☐ Logging should be formatted in a way that it can be used for finetuning the lower param models
+☐ Fix tab not found error when an existing chrome window is open - Also unable to know which tab is active
+☐ Implement a wait command - Test
+✔ Add autocomplete for website urls @done(26-06-30 15:56)
+☐ Fix execution retry not working
+☐ Add Intelligence model in settings to read as add LLM, simple language
+☐ Better Logs: I want to be able to see all prompts and all outputs from the LLM throughout the process
+☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
+☐ Scroll interaction - Only relevant for vision models - needs testing
+☐ Implement retry for the planning agent
+☐ When testing negative cases "EG verify something is not..." the agent get lazy 
 ☐ Enable export markdown to pdf
 ☐ Generation of markdown testing report for replay. User should be able to choose whether they want report for success, failed or both. 
 ☐ Device emulation
 ☐ Uploading of PRD/requirements to be broken down into goals
 ☐ Backend database
 ☐ Backtracking
+☐ UI improvement, the whole UI is a bit janky.
 -what if we could generate a graph of possible interactions and build it at each interaction,
 such that we can see all the possible paths we can take and the probability of each path leading to the goal.
 ☐ Test optimization
 ☐ Cookie and local storage injection
+☐ Variables and user information injection
 ☐ Mock APIs
 ☐ Test creation from requirements spec
-☐ Browser console logs extraction
-☐ Bulk form filling
 ☐ exploratoty testing
-☐ Test healing 
-☐ Desktop app
-☐ Task Queue
-☐ Test pipeline
 ☐ Vector db integration for analysis
-☐ Human in the loop
-☐ Report Generation
-☐ Artifact storage
-☐ APS - Agent Performance Score
 ☐ Failure analysis categorization (Perception, Reasoning, Execution etc)
 ☐ SOTA visual regression testing

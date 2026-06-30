@@ -6,8 +6,8 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { ZodError, z } from "zod";
 import { fromError } from "zod-validation-error";
-import { generateObject, type LanguageModel } from "ai";
-import { getProviderOptions } from "../utils";
+import { type LanguageModel } from "ai";
+import { getProviderOptions, generateObjectWithTimeout } from "../utils";
 
 export function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   if (!obj) return;
@@ -194,11 +194,12 @@ export async function reformatJsonWithAgent<T>(params: {
   schema: z.ZodSchema<T>;
   rawResponse: string;
   errors: string;
+  abortSignal?: AbortSignal;
 }): Promise<T> {
   console.log(`[Agent][Reformatter] Attempting to reformat invalid JSON with dedicated reformatter agent...`);
 
   try {
-    const result = await generateObject({
+    const result = await generateObjectWithTimeout({
       model: params.model,
       schema: params.schema,
       system: `You are a dedicated JSON repair/reformatting assistant. 
@@ -221,11 +222,12 @@ ${params.errors}
 Please correct the JSON completely so that it matches the schema exactly and passes all validation checks.`,
         },
       ],
+      abortSignal: params.abortSignal,
     });
 
     return result.object;
   } catch (e: any) {
-    console.warn(`[Agent][Reformatter] generateObject threw an error:`, e.message);
+    console.warn(`[Agent][Reformatter] generateObjectWithTimeout threw an error:`, e.message);
     const reformattedRaw = e.text || e.cause?.text || e.response?.text;
     if (reformattedRaw) {
       const extractedStr = extractJsonFromMarkdown(reformattedRaw);
@@ -298,16 +300,28 @@ export async function runWithSchemaRecovery<T>(params: {
   maxRetries?: number;
   label?: string;
   onMaxRetriesExceeded?: (error: any) => Promise<void> | void;
+  abortSignal?: AbortSignal;
 }): Promise<T> {
   const maxRetries = params.maxRetries ?? 3;
   let retries = 0;
 
   while (retries < maxRetries) {
     try {
+      if (params.abortSignal?.aborted) {
+        throw new Error("Agent terminated by user");
+      }
       return await params.taskFn();
     } catch (e: any) {
       retries++;
       let errorMessage = e.message;
+      
+      if (params.abortSignal?.aborted || errorMessage?.includes("Agent terminated by user") || errorMessage?.includes("timeout")) {
+        if (params.onMaxRetriesExceeded) {
+          await params.onMaxRetriesExceeded(e);
+        }
+        throw e;
+      }
+
       const details = extractSchemaErrors(e);
       if (details) {
         errorMessage = details;
@@ -330,6 +344,7 @@ export async function runWithSchemaRecovery<T>(params: {
                 schema: params.schema,
                 rawResponse,
                 errors: details,
+                abortSignal: params.abortSignal,
               });
               isParsedSuccess = true;
             } catch (reformatErr: any) {
@@ -360,6 +375,7 @@ export async function runWithSchemaRecovery<T>(params: {
                     schema: params.schema,
                     rawResponse: extractedStr!,
                     errors: localDetails,
+                    abortSignal: params.abortSignal,
                   });
                   isParsedSuccess = true;
                 } catch (reformatErr: any) {

@@ -1,8 +1,8 @@
-import { generateObject, type LanguageModel } from "ai";
+import { type LanguageModel } from "ai";
 import { type AgentHistoryMessage } from "./types";
 import { ExecutionResponseSchema, type Checklist, type ExecutionResponse } from "../actions";
 import { TestSerializer } from "../recorder";
-import { prepareImagePart, getProviderOptions } from "../utils";
+import { prepareImagePart, getProviderOptions, generateObjectWithTimeout } from "../utils";
 
 export async function executeTask(params: {
   model: LanguageModel;
@@ -16,6 +16,7 @@ export async function executeTask(params: {
   supportsVision?: boolean;
   consecutiveSameAction?: number;
   serializer?: TestSerializer;
+  abortSignal?: AbortSignal;
 }): Promise<ExecutionResponse> {
   const currentIssues =
     params.serializer?.getTest()?.issues || params.checklist.issues || [];
@@ -38,7 +39,7 @@ export async function executeTask(params: {
 
   console.log("[Agent][Executor] Beginning execution prompt");
 
-  const result = await generateObject({
+  const result = await generateObjectWithTimeout({
     model: params.model,
     schema: ExecutionResponseSchema,
     system: executionPrompt,
@@ -58,6 +59,7 @@ export async function executeTask(params: {
         ],
       },
     ],
+    abortSignal: params.abortSignal,
   });
   return result.object;
 }

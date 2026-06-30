@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Icons } from "../components/ui/Icons";
 import { MarkdownRenderer } from "../components/ui/MarkdownRenderer";
+import { AutocompleteInput } from "../components/ui/AutocompleteInput";
 
 interface Test {
   id: string;
@@ -31,6 +32,7 @@ export const TestDetails = () => {
   const [editUrl, setEditUrl] = useState("");
   const [editRequirement, setEditRequirement] = useState("");
   const [editModel, setEditModel] = useState("");
+  const [urlSuggestions, setUrlSuggestions] = useState<string[]>([]);
 
   const loadTest = async () => {
     if (!testId) return;
@@ -41,6 +43,11 @@ export const TestDetails = () => {
       setEditName(testData.name);
       setEditUrl(testData.url);
       setEditRequirement(testData.requirement);
+
+      // Load URL suggestions scoped to the application
+      const allTests = await window.electron.listTests(testData.appId);
+      const suggestions = Array.from(new Set(allTests.map((t: any) => t.url).filter(Boolean)));
+      setUrlSuggestions(suggestions);
 
       const config = await window.electron.getConfig();
       setModels(config.models);
@@ -251,10 +258,13 @@ export const TestDetails = () => {
                       <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">
                         Start URL
                       </label>
-                      <input
+                      <AutocompleteInput
                         value={editUrl}
-                        onChange={(e) => setEditUrl(e.target.value)}
-                        className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors font-mono"
+                        onChange={setEditUrl}
+                        suggestions={urlSuggestions}
+                        placeholder="https://example.com"
+                        className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors font-mono text-sm"
+                        required
                       />
                     </div>
                     <div className="space-y-2">

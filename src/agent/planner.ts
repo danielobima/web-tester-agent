@@ -1,7 +1,7 @@
-import { generateObject, type LanguageModel } from "ai";
+import { type LanguageModel } from "ai";
 import { type AgentHistoryMessage } from "./types";
 import { ChecklistSchema, type Checklist } from "../actions";
-import { prepareImagePart, getProviderOptions } from "../utils";
+import { prepareImagePart, getProviderOptions, generateObjectWithTimeout } from "../utils";
 
 export async function planTask(params: {
   model: LanguageModel;
@@ -12,10 +12,11 @@ export async function planTask(params: {
   planningPrompt: string;
   screenshot?: Buffer;
   supportsVision?: boolean;
+  abortSignal?: AbortSignal;
 }): Promise<Checklist> {
   console.log(`[Agent][Planner] Planning...`);
   console.log("[Agent][Planner] Vision enabled", params.supportsVision);
-  const planningResult = await generateObject({
+  const planningResult = await generateObjectWithTimeout({
     model: params.model,
     schema: ChecklistSchema,
     system: params.planningPrompt,
@@ -36,6 +37,7 @@ export async function planTask(params: {
       },
     ],
     temperature: 1,
+    abortSignal: params.abortSignal,
   });
 
   return planningResult.object;

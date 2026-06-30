@@ -1,3 +1,7 @@
+import { generateObject, type GenerateObjectResult } from "ai";
+import { z } from "zod";
+import { type ModelConfig } from "./data";
+
 /**
  * Simple utility to check if a model likely supports vision.
  * Standardizes detection across different providers.
@@ -82,5 +86,59 @@ export function getProviderOptions(model: any): Record<string, any> | undefined 
     }
   }
   return undefined;
+}
+
+/**
+ * Universal wrapper around generateObject that enforces a configurable timeout from the model config
+ * while still respecting the main AbortSignal.
+ */
+export async function generateObjectWithTimeout<T>(
+  options: Omit<Parameters<typeof generateObject>[0], "schema"> & {
+    schema: z.ZodSchema<T> | import("ai").Schema<T>;
+    abortSignal?: AbortSignal;
+  }
+): Promise<GenerateObjectResult<T>> {
+  const model = options.model;
+  const config = (model as any).agentConfig as ModelConfig | undefined;
+  const timeoutSec = config?.timeout;
+
+  if (!timeoutSec && !options.abortSignal) {
+    return generateObject(options as any) as any;
+  }
+
+  const controller = new AbortController();
+  const parentSignal = options.abortSignal;
+
+  const onParentAbort = () => {
+    controller.abort(new Error("Agent terminated by user"));
+  };
+
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      throw new Error("Agent terminated by user");
+    }
+    parentSignal.addEventListener("abort", onParentAbort);
+  }
+
+  let timeoutId: NodeJS.Timeout | undefined;
+  if (timeoutSec && timeoutSec > 0) {
+    timeoutId = setTimeout(() => {
+      controller.abort(new Error(`LLM response timeout of ${timeoutSec}s exceeded`));
+    }, timeoutSec * 1000);
+  }
+
+  try {
+    return await generateObject({
+      ...options,
+      abortSignal: controller.signal,
+    } as any) as any;
+  } finally {
+    if (parentSignal) {
+      parentSignal.removeEventListener("abort", onParentAbort);
+    }
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 

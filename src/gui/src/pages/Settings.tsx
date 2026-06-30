@@ -10,6 +10,7 @@ interface ModelConfig {
   baseUrl?: string;
   supportsVision?: boolean;
   ollamaThink?: boolean;
+  timeout?: number;
 }
 
 interface AppConfig {
@@ -34,7 +35,8 @@ export const Settings = () => {
     apiKey: "",
     baseUrl: "",
     supportsVision: false,
-    ollamaThink: true
+    ollamaThink: true,
+    timeout: undefined
   });
 
   useEffect(() => {
@@ -70,7 +72,8 @@ export const Settings = () => {
       apiKey: model.apiKey || "",
       baseUrl: model.baseUrl || "",
       supportsVision: model.supportsVision || false,
-      ollamaThink: model.ollamaThink !== false
+      ollamaThink: model.ollamaThink !== false,
+      timeout: model.timeout
     });
     setEditingModelId(model.id);
     setShowAddModal(true);
@@ -86,7 +89,8 @@ export const Settings = () => {
       apiKey: "",
       baseUrl: "",
       supportsVision: false,
-      ollamaThink: true
+      ollamaThink: true,
+      timeout: undefined
     });
   };
 
@@ -126,7 +130,8 @@ export const Settings = () => {
       apiKey: "",
       baseUrl: "",
       supportsVision: false,
-      ollamaThink: true
+      ollamaThink: true,
+      timeout: undefined
     });
   };
 
@@ -212,6 +217,11 @@ export const Settings = () => {
                               : 'bg-on-surface/5 text-on-surface/40'
                           }`}>
                             {model.ollamaThink !== false ? 'Thinking' : 'No Thinking'}
+                          </span>
+                        )}
+                        {model.timeout && (
+                          <span className="text-[10px] bg-red-500/10 text-red-500 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">
+                            {model.timeout}s Timeout
                           </span>
                         )}
                       </div>
@@ -320,7 +330,7 @@ export const Settings = () => {
             </div>
             
             <div className="p-8 space-y-6">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Provider</label>
                   <select 
@@ -339,6 +349,17 @@ export const Settings = () => {
                     value={newModel.name}
                     onChange={e => setNewModel({...newModel, name: e.target.value})}
                     placeholder="e.g. Local Qwen"
+                    className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Timeout (Seconds)</label>
+                  <input 
+                    type="number"
+                    min="1"
+                    value={newModel.timeout || ""}
+                    onChange={e => setNewModel({...newModel, timeout: e.target.value ? parseInt(e.target.value, 10) : undefined})}
+                    placeholder="e.g. 60"
                     className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium"
                   />
                 </div>

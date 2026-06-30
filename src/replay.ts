@@ -1,9 +1,9 @@
-import { generateObject, type LanguageModel } from "ai";
+import { type LanguageModel } from "ai";
 import { BrowserManager } from "./browser";
 import { ActionSchema, Action, Assertion } from "./actions";
 import { TestSerializer, TestStep } from "./recorder";
 import * as path from "path";
-import { getProviderOptions } from "./utils";
+import { getProviderOptions, generateObjectWithTimeout } from "./utils";
 
 export async function evaluateAssertions(
   assertions: Assertion[],
@@ -176,6 +176,7 @@ async function heal(
   model: LanguageModel,
   fullSnapshot?: boolean,
   supportsVision?: boolean,
+  abortSignal?: AbortSignal,
 ): Promise<Action> {
   console.log(
     `[Healer] Attempting to heal step: ${JSON.stringify(step.action)}`,
@@ -194,7 +195,7 @@ async function heal(
     .replace("{{brokenAction}}", JSON.stringify(step.action))
     .replace("{{errorMsg}}", errorMsg);
 
-  const { object: action } = await generateObject({
+  const { object: action } = await generateObjectWithTimeout({
     model: model,
     schema: ActionSchema,
     system: systemPrompt,
@@ -205,6 +206,7 @@ async function heal(
         content: `Current State:\n${snapshot}`,
       },
     ],
+    abortSignal,
   });
 
   console.log(`[Healer] Proposed new action: ${JSON.stringify(action)}`);
@@ -306,7 +308,7 @@ export async function replayTest(
       console.error(`[Replay] ❌ Step ${i + 1} Failed: ${e.message}`);
 
       // Attempt Healing
-      const newAction = await heal(step, browser, e.message, test.name, model, fullSnapshot, supportsVision);
+      const newAction = await heal(step, browser, e.message, test.name, model, fullSnapshot, supportsVision, signal);
 
       try {
         console.log(`[Replay] 🛠️ Executing healed action...`);

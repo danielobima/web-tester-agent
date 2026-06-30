@@ -29,6 +29,7 @@ export interface ModelConfig {
   baseUrl?: string;
   supportsVision?: boolean;
   ollamaThink?: boolean;
+  timeout?: number;
 }
 
 export interface AppConfig {

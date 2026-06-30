@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Icons } from "../components/ui/Icons";
 
+import { AutocompleteInput } from "../components/ui/AutocompleteInput";
+
 interface Test {
   id: string;
   appId: string;
@@ -34,6 +36,8 @@ export const ApplicationDetails = () => {
   const [newUrl, setNewUrl] = useState("");
   const [newRequirement, setNewRequirement] = useState("");
   const [newModel, setNewModel] = useState("");
+
+  const urlSuggestions = Array.from(new Set(tests.map(t => t.url).filter(Boolean)));
 
   const loadData = async () => {
     if (!appId) return;
@@ -192,12 +196,14 @@ export const ApplicationDetails = () => {
 
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Start URL</label>
-                <input 
-                  type="url"
+                <AutocompleteInput 
                   value={newUrl}
-                  onChange={e => setNewUrl(e.target.value)}
+                  onChange={setNewUrl}
+                  suggestions={urlSuggestions}
                   placeholder="https://example.com"
                   className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm"
+                  type="url"
+                  required
                 />
               </div>
 

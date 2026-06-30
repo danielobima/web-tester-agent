@@ -5,7 +5,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { evaluateAssertions } from "./replay";
 import { saveAgentErrorReport, type TokenBreakdown } from "./error_logger";
-import { prepareImagePart, getProviderOptions } from "./utils";
+import { prepareImagePart, getProviderOptions, generateObjectWithTimeout } from "./utils";
 
 import {
   AgentHistoryMessage,
@@ -160,6 +160,7 @@ export async function runVisualAgent(
         schema: ChecklistSchema,
         label: "Planner",
         history,
+        abortSignal: signal,
         taskFn: () => planTask({
           model,
           requirement,
@@ -169,6 +170,7 @@ export async function runVisualAgent(
           planningPrompt,
           screenshot,
           supportsVision,
+          abortSignal: signal,
         }),
         onMaxRetriesExceeded: async (e) => {
           if (onPlanning) onPlanning(false);
@@ -380,6 +382,7 @@ export async function runVisualAgent(
           schema: ExecutionResponseSchema,
           label: "Executor",
           history,
+          abortSignal: signal,
           taskFn: () => executeTask({
             model,
             requirement,
@@ -392,6 +395,7 @@ export async function runVisualAgent(
             supportsVision,
             consecutiveSameAction,
             serializer,
+            abortSignal: signal,
           }),
           onMaxRetriesExceeded: async (e) => {
             const tokenBreakdown = getTokenBreakdown({
@@ -569,9 +573,10 @@ export async function runVisualAgent(
             schema: AssertionAgentResponseSchema,
             label: "Asserter",
             history: assertionHistory,
+            abortSignal: signal,
             taskFn: async () => {
               console.log(`[VisualAgent][Asserter] Verifying task completion...`);
-              const assertionResult = await generateObject({
+              const assertionResult = await generateObjectWithTimeout({
                 model,
                 schema: AssertionAgentResponseSchema,
                 system: assertionPromptTemplate,
@@ -593,6 +598,7 @@ export async function runVisualAgent(
                     ],
                   },
                 ],
+                abortSignal: signal,
               });
 
               const res = assertionResult.object;
