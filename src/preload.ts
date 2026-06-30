@@ -84,6 +84,12 @@ contextBridge.exposeInMainWorld('electron', {
   getConfig: () => ipcRenderer.invoke("get-config"),
   saveConfig: (config: any) => ipcRenderer.invoke("save-config", config),
 
+  // Variables Management
+  listVariables: (appId?: string) => ipcRenderer.invoke("list-variables", appId),
+  createVariable: (config: { appId: string, name: string, type: string, value: string, purpose: string, expiry?: string }) => ipcRenderer.invoke("create-variable", config),
+  updateVariable: (varId: string, config: any) => ipcRenderer.invoke("update-variable", { varId, config }),
+  deleteVariable: (varId: string) => ipcRenderer.invoke("delete-variable", varId),
+
   startTest: (url: string, requirement: string, testId?: string, model?: string) => {
     ipcRenderer.send('start-test', { url, requirement, testId, model });
   }

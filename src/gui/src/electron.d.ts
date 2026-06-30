@@ -42,6 +42,12 @@ declare global {
       getConfig: () => Promise<any>;
       saveConfig: (config: any) => Promise<{ success: boolean }>;
 
+      // Variables Management
+      listVariables: (appId?: string) => Promise<any[]>;
+      createVariable: (config: { appId: string, name: string, type: string, value: string, purpose: string, expiry?: string }) => Promise<any>;
+      updateVariable: (varId: string, config: any) => Promise<any>;
+      deleteVariable: (varId: string) => Promise<{ success: boolean }>;
+
       startTest: (url: string, requirement: string, testId?: string, model?: string) => void;
     };
   }

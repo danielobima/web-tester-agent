@@ -40,10 +40,22 @@ export interface AppConfig {
   visualFirst?: boolean;
 }
 
+export interface Variable {
+  id: string;
+  appId: string;
+  name: string;
+  type: "string" | "number" | "boolean" | "secret" | "json";
+  value: string;
+  expiry?: string;
+  purpose: string;
+  createdAt: number;
+}
+
 const dataDir = path.join(app.getPath("userData"), "data");
 const appsFile = path.join(dataDir, "applications.json");
 const testsFile = path.join(dataDir, "tests.json");
 const configFile = path.join(dataDir, "config.json");
+const variablesFile = path.join(dataDir, "variables.json");
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -117,4 +129,23 @@ export async function getConfig(): Promise<AppConfig> {
 export async function saveConfig(config: AppConfig) {
   await ensureDataDir();
   await fs.writeFile(configFile, JSON.stringify(config, null, 2), "utf-8");
+}
+
+export async function listVariables(appId?: string): Promise<Variable[]> {
+  await ensureDataDir();
+  try {
+    const content = await fs.readFile(variablesFile, "utf-8");
+    const variables: Variable[] = JSON.parse(content);
+    if (appId) {
+      return variables.filter(v => v.appId === appId);
+    }
+    return variables;
+  } catch (error) {
+    return [];
+  }
+}
+
+export async function saveVariables(variables: Variable[]): Promise<void> {
+  await ensureDataDir();
+  await fs.writeFile(variablesFile, JSON.stringify(variables, null, 2), "utf-8");
 }

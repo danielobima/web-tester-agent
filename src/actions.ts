@@ -509,6 +509,45 @@ export const ActionSchema = z.discriminatedUnion("kind", [
         .describe("The text, role, or label to search for in the DOM snapshot. E.g., 'button', 'input', 'Sign In', 'Email textbox'"),
     })
     .describe("Search the snapshot for specific elements matching the query to retrieve their ref IDs."),
+
+  z
+    .object({
+      kind: z.literal("create_variable"),
+      name: z
+        .string()
+        .describe("The name/key of the variable to create or update (e.g. 'VERIFICATION_CODE')"),
+      type: z
+        .enum(["string", "number", "boolean", "secret", "json"])
+        .default("string")
+        .describe("The data type of the variable"),
+      source: z
+        .enum(["arbitrary", "website_content", "network_logs", "console_logs"])
+        .describe("The source from which to extract/retrieve the variable value"),
+      value: z
+        .string()
+        .optional()
+        .describe("The exact value of the variable, only required when source is 'arbitrary'"),
+      ref: z
+        .string()
+        .optional()
+        .describe("The 'ref' ID of the element to extract content from (used when source is 'website_content')"),
+      selector: z
+        .string()
+        .optional()
+        .describe("A valid Playwright CSS/XPath selector to extract content from (used when source is 'website_content' and ref is missing)"),
+      regex: z
+        .string()
+        .optional()
+        .describe("An optional regular expression with a capture group (e.g., 'code is (\\d+)') to extract the value from text, network logs, or console logs"),
+      purpose: z
+        .string()
+        .describe("A text description detailing how and where to use this variable"),
+      expiry: z
+        .string()
+        .optional()
+        .describe("Optional description of the variable's expiration rule"),
+    })
+    .describe("Dynamically extract or declare a variable to be used in subsequent steps of this test."),
 ]);
 
 // Extract the inferred type to use across the project

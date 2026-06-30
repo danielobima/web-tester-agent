@@ -4,6 +4,7 @@ import { TestSerializer } from "./recorder";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { z } from "zod";
+import * as data from "./data";
 import { evaluateAssertions } from "./replay";
 import { saveAgentErrorReport } from "./error_logger";
 import { prepareImagePart, getProviderOptions, generateObjectWithTimeout } from "./utils";
@@ -77,7 +78,9 @@ export async function runAgent(
   signal?: AbortSignal,
   supportsVision?: boolean,
   autoApprovePlan?: boolean,
+  appId?: string,
 ) {
+  let activeVariables = appId ? await data.listVariables(appId) : [];
   const history: AgentHistoryMessage[] = [];
   let stepCounter = 1;
   let needsPlanApproval = !autoApprovePlan;
@@ -124,6 +127,14 @@ export async function runAgent(
   try {
     while (stepCounter < 50) {
       if (signal?.aborted) throw new Error("Agent terminated by user");
+
+      let currentRequirement = requirement;
+      if (activeVariables.length > 0) {
+        const formattedVars = activeVariables
+          .map((v) => `- ${v.name} (${v.type}): ${v.value} [Purpose: ${v.purpose}]`)
+          .join("\n");
+        currentRequirement += `\n\nAvailable Application Variables:\n${formattedVars}`;
+      }
 
       if (onManualPause) {
         const pauseResult = await onManualPause(checklist);
@@ -185,7 +196,7 @@ export async function runAgent(
         abortSignal: signal,
         taskFn: () => planTask({
           model,
-          requirement,
+          requirement: currentRequirement,
           checklist,
           snapshot,
           history,
@@ -196,7 +207,7 @@ export async function runAgent(
         }),
         onMaxRetriesExceeded: async (e) => {
           if (onPlanning) onPlanning(false);
-          const latestUserText = `Goal: ${requirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`;
+          const latestUserText = `Goal: ${currentRequirement}\n\nChecklist: ${JSON.stringify(checklist, null, 2)}\n\nCurrent State:\n${snapshot}`;
           const tokenBreakdown = getTokenBreakdown({
             systemPrompt: planningPrompt,
             history,
@@ -213,7 +224,7 @@ export async function runAgent(
                 error: e,
                 type: "planning",
                 step: stepCounter,
-                requirement,
+                requirement: currentRequirement,
                 url: currentUrl,
                 history: [...history],
                 snapshot,
@@ -407,7 +418,7 @@ export async function runAgent(
         abortSignal: signal,
         taskFn: () => executeTask({
           model,
-          requirement,
+          requirement: currentRequirement,
           currentTask,
           checklist,
           snapshot,
@@ -425,7 +436,7 @@ export async function runAgent(
           const issuesSummary = currentIssues
             .map((i) => `${i.id}: ${i.description}`)
             .join("; ");
-          const latestUserText = `Goal: ${requirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction && consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`;
+          const latestUserText = `Goal: ${currentRequirement}\nTask: ${currentTask.description}\n\nIdentified Issues: ${issuesSummary || "None"}\n\nCurrent State:\n${snapshot}${consecutiveSameAction && consecutiveSameAction > 0 ? `\n\nWARNING: You are repeating an action that recently failed. Try a different approach.` : ""}`;
 
           const tokenBreakdown = getTokenBreakdown({
             systemPrompt: executionPrompt,
@@ -443,7 +454,7 @@ export async function runAgent(
                 error: e,
                 type: "execution",
                 step: stepCounter,
-                requirement,
+                requirement: currentRequirement,
                 url: currentUrl,
                 taskId: currentTaskId,
                 taskDescription: currentTask.description,
@@ -482,7 +493,127 @@ export async function runAgent(
         consecutiveSameAction = 0;
       }
 
-      if (action.kind === "stop" || action.kind === "none") {
+      if (action.kind === "create_variable") {
+        try {
+          let extractedValue = "";
+          if (action.source === "arbitrary") {
+            extractedValue = action.value || "";
+          } else if (action.source === "website_content") {
+            if (action.ref) {
+              const locator = await browser.getLocator(action.ref);
+              extractedValue = await locator.innerText().catch(() => "");
+              if (!extractedValue) {
+                extractedValue = await locator.inputValue().catch(() => "");
+              }
+            } else if (action.selector) {
+              extractedValue = await browser.page?.locator(action.selector).first().innerText().catch(() => "") || "";
+              if (!extractedValue) {
+                extractedValue = await browser.page?.locator(action.selector).first().inputValue().catch(() => "") || "";
+              }
+            } else {
+              extractedValue = await browser.page?.locator("body").innerText().catch(() => "") || "";
+            }
+          } else if (action.source === "network_logs") {
+            extractedValue = browser.networkLogs.map(n => `[${n.method}] ${n.url} (${n.status})`).join("\n");
+          } else if (action.source === "console_logs") {
+            extractedValue = browser.consoleLogs.map(l => l.text).join("\n");
+          }
+
+          if (action.regex) {
+            const match = new RegExp(action.regex).exec(extractedValue);
+            if (match) {
+              extractedValue = match[1] || match[0];
+            } else {
+              console.warn(`[Agent] Regex '${action.regex}' did not match extracted content.`);
+            }
+          }
+
+          console.log(`[Agent] Extracted variable '${action.name}' value: '${extractedValue}'`);
+
+          if (appId) {
+            const vars = await data.listVariables(appId);
+            const existingIndex = vars.findIndex(v => v.name === action.name);
+            const updatedVar: data.Variable = {
+              id: existingIndex !== -1 ? vars[existingIndex].id : `var-${Date.now()}`,
+              appId,
+              name: action.name,
+              type: action.type || "string",
+              value: extractedValue,
+              purpose: action.purpose,
+              expiry: action.expiry,
+              createdAt: Date.now(),
+            };
+            if (existingIndex !== -1) {
+              vars[existingIndex] = updatedVar;
+            } else {
+              vars.push(updatedVar);
+            }
+            await data.saveVariables(vars);
+            activeVariables = vars;
+          } else {
+            const existingIndex = activeVariables.findIndex(v => v.name === action.name);
+            const updatedVar: data.Variable = {
+              id: existingIndex !== -1 ? activeVariables[existingIndex].id : `var-${Date.now()}`,
+              appId: "cli",
+              name: action.name,
+              type: action.type || "string",
+              value: extractedValue,
+              purpose: action.purpose,
+              expiry: action.expiry,
+              createdAt: Date.now(),
+            };
+            if (existingIndex !== -1) {
+              activeVariables[existingIndex] = updatedVar;
+            } else {
+              activeVariables.push(updatedVar);
+            }
+          }
+
+          executionResponse.previousActionResult = `Successfully created/updated variable '${action.name}' with value '${extractedValue}'.`;
+          executionResponse.isTaskComplete = true;
+
+          if (onStep) {
+            onStep({
+              id: `exec-${stepCounter}`,
+              step: `Creating Variable: ${action.name}`,
+              status: "success",
+              duration: `${((Date.now() - actionStartTime) / 1000).toFixed(1)}s`,
+              description: `Extracted value from ${action.source}. Purpose: ${action.purpose}`,
+              stateDescription: `Variable '${action.name}' value: '${extractedValue}'`,
+              screenshot: screenshotPath,
+              action,
+              issues: executionResponse.issues,
+              url: browser.page?.url() || "",
+            });
+          }
+
+          history.push({
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: `Observation: Created variable ${action.name} with value ${extractedValue}\nAction: create_variable`,
+              },
+            ],
+          });
+
+          if (serializer) {
+            serializer.logAction(action, {
+              stateDescription: `Created variable ${action.name} with value ${extractedValue}`,
+              actionIntent: `Declare variable ${action.name}`,
+              taskId: currentTaskId,
+              stateSnapshot: screenshotPath,
+              issues: executionResponse.issues,
+            });
+            await serializer.saveTest();
+          }
+
+        } catch (e: any) {
+          console.error(`[Agent] Failed to create variable: ${e.message}`);
+          executionResponse.previousActionResult = `Failed to create variable: ${e.message}`;
+          executionResponse.isTaskComplete = false;
+        }
+      } else if (action.kind === "stop" || action.kind === "none") {
         console.log(
           `[Agent][Executor] Task completion indicated via ${action.kind}.`,
         );

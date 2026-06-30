@@ -41,12 +41,16 @@
 ✔ Telling the user that the goal was acheived is a bit misleading if there were issues found, maybe we just say execution completed or something similar @done(26-05-13 12:55)
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
+☐ Variables -> see Variables.TODO
+☐ A way to setup base URL and environment(prod, staging, local etc)
 ☐ Logging should be formatted in a way that it can be used for finetuning the lower param models
 ☐ Fix tab not found error when an existing chrome window is open - Also unable to know which tab is active
 ☐ Implement a wait command - Test
 ✔ Add autocomplete for website urls @done(26-06-30 15:56)
-☐ Fix execution retry not working
-☐ Add Intelligence model in settings to read as add LLM, simple language
+☐ Fix execution retry not working - it triggers replay instead of retrying the execution
+☐ Stop test execution button is missing
+✔ Add Intelligence model in settings to read as add LLM, simple language @done(26-06-30 16:41)
+☐ Task classification: Instead of feeding all instructions into the execution/planning agents, we can classify common tasks and give specialised prompts to make execution more efficient
 ☐ Better Logs: I want to be able to see all prompts and all outputs from the LLM throughout the process
 ☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
 ☐ Scroll interaction - Only relevant for vision models - needs testing

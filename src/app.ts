@@ -17,16 +17,34 @@ import { createModel } from "./models";
 dotenv.config();
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: "media", privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: true, stream: true } }
+  {
+    scheme: "media",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+      stream: true,
+    },
+  },
 ]);
 
 const suitesDir = path.join(app.getPath("userData"), "suites");
 
 let mainWindow: BrowserWindow | null = null;
 let activeTestController: AbortController | null = null;
-let planApprovalPromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
-let goalValidationPromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
-let pausePromise: { resolve: (val: any) => void; reject: (err: any) => void } | null = null;
+let planApprovalPromise: {
+  resolve: (val: any) => void;
+  reject: (err: any) => void;
+} | null = null;
+let goalValidationPromise: {
+  resolve: (val: any) => void;
+  reject: (err: any) => void;
+} | null = null;
+let pausePromise: {
+  resolve: (val: any) => void;
+  reject: (err: any) => void;
+} | null = null;
 let isPaused = false;
 
 // Model configuration is now handled dynamically via getConfig() and models.ts
@@ -57,19 +75,17 @@ function createWindow() {
   });
 }
 
-
 app.whenReady().then(async () => {
-  
   // Register media protocol to serve local images securely
   protocol.handle("media", async (request) => {
     try {
       let filePath = decodeURIComponent(request.url.replace("media://", ""));
-      
+
       // Normalization: Ensure the path is absolute (critical for Linux)
       if (!filePath.startsWith("/")) {
         filePath = "/" + filePath;
       }
-      
+
       // Security: Only allow paths within userData
       const userDataPath = app.getPath("userData");
       if (!filePath.startsWith(userDataPath)) {
@@ -95,142 +111,185 @@ app.whenReady().then(async () => {
 
   createWindow();
 
-  ipcMain.on("start-test", async (event, { url, requirement, testId, model }) => {
-    const browser = new BrowserManager();
-    const testStartTime = Date.now();
-    const serializer = new TestSerializer();
-    const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
-    
-    const suiteName = requirement.slice(0, 30).replace(/[^a-z0-9]/gi, "_").toLowerCase();
-    const timestamp = Date.now();
-    const suitePath = path.join(suitesDir, `suite-${suiteName}-${timestamp}.json`);
-    const sessionScreenshotsDir = path.join(suitesDir, `suite-${suiteName}-${timestamp}.screenshots`);
-    await fs.mkdir(sessionScreenshotsDir, { recursive: true });
-    
-    const artifactsDir = app.getPath("userData");
-    const config = await data.getConfig();
-    const modelConfig = config.models.find(m => m.id === model) || config.models[0];
-    if (!modelConfig) {
-      throw new Error("No intelligence models are configured. Please go to Settings and add at least one AI model before running tests.");
-    }
-    const aiModel = createModel(modelConfig);
-    const modelSupportsVision = config.visualFirst && isVisionModel(modelConfig.provider, modelConfig.modelName, modelConfig.supportsVision);
+  ipcMain.on(
+    "start-test",
+    async (event, { url, requirement, testId, model }) => {
+      const browser = new BrowserManager();
+      const testStartTime = Date.now();
+      const serializer = new TestSerializer();
+      const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
 
-    serializer.startTest(requirement, url);
-    serializer.setOutPath(suitePath);
-
-    activeTestController = new AbortController();
-    try {
-      await browser.init(config.headless || false);
-      await browser.execute({ kind: "navigate", url });
-      const runner = config.visualFirst ? runVisualAgent : runAgent;
-      await runner(
-        requirement,
-        browser,
-        aiModel,
-        serializer,
-        artifactsDir,
-        false,
-        false,
-        (update) => {
-          if (mainWindow) mainWindow.webContents.send("test-step", update);
-        },
-        (checklist) => {
-          if (mainWindow) mainWindow.webContents.send("test-checklist", checklist);
-        },
-        async (checklist) => {
-          if (!mainWindow) return { action: 'accept' };
-          return new Promise((resolve, reject) => {
-            planApprovalPromise = { resolve, reject };
-            mainWindow?.webContents.send("plan-approval-request", checklist);
-          });
-        },
-        async (checklist) => {
-          if (!mainWindow) return { action: 'validate' };
-          return new Promise((resolve, reject) => {
-            goalValidationPromise = { resolve, reject };
-            mainWindow?.webContents.send("execution-finished", checklist);
-          });
-        },
-        (planning) => {
-          if (mainWindow) mainWindow.webContents.send("test-planning-state", planning);
-        },
-        async (checklist) => {
-          if (!mainWindow) return { action: 'resume' };
-          if (!isPaused) return { action: 'resume' };
-          
-          return new Promise((resolve, reject) => {
-            pausePromise = { resolve, reject };
-            mainWindow?.webContents.send("pause-request", checklist);
-          });
-        },
-        sessionScreenshotsDir,
-        (issues) => {
-          if (mainWindow) mainWindow.webContents.send("test-issues", issues);
-        },
-        activeTestController.signal,
-        modelSupportsVision,
-        !config.requirePlanApproval
+      const suiteName = requirement
+        .slice(0, 30)
+        .replace(/[^a-z0-9]/gi, "_")
+        .toLowerCase();
+      const timestamp = Date.now();
+      const suitePath = path.join(
+        suitesDir,
+        `suite-${suiteName}-${timestamp}.json`,
       );
+      const sessionScreenshotsDir = path.join(
+        suitesDir,
+        `suite-${suiteName}-${timestamp}.screenshots`,
+      );
+      await fs.mkdir(sessionScreenshotsDir, { recursive: true });
 
-      const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
+      const artifactsDir = app.getPath("userData");
+      const config = await data.getConfig();
+      const modelConfig =
+        config.models.find((m) => m.id === model) || config.models[0];
+      if (!modelConfig) {
+        throw new Error(
+          "No LLMs are configured. Please go to Settings and add at least one AI model before running tests.",
+        );
+      }
+      const aiModel = createModel(modelConfig);
+      const modelSupportsVision =
+        config.visualFirst &&
+        isVisionModel(
+          modelConfig.provider,
+          modelConfig.modelName,
+          modelConfig.supportsVision,
+        );
 
-      // Link result to test ID if provided
+      serializer.startTest(requirement, url);
+      serializer.setOutPath(suitePath);
+
+      let appId = "";
       if (testId) {
-        const tests = await data.listTests();
-        const testIndex = tests.findIndex(t => t.id === testId);
-        if (testIndex !== -1) {
-          tests[testIndex].lastRunPath = suitePath;
-          await data.saveTests(tests);
+        try {
+          const tests = await data.listTests();
+          const test = tests.find((t) => t.id === testId);
+          if (test) {
+            appId = test.appId;
+          }
+        } catch (e) {
+          console.warn("[IPC] Failed to find appId for test:", e);
         }
       }
 
-      // Generate markdown report
-      const testData = serializer.getTest();
-      if (testData) {
-        const reportFileName = path.basename(suitePath).replace(".json", ".report.md");
-        await generateMarkdownReport(testData, suitesDir, reportFileName);
-      }
+      activeTestController = new AbortController();
+      try {
+        await browser.init(config.headless || false);
+        await browser.execute({ kind: "navigate", url });
+        const runner = config.visualFirst ? runVisualAgent : runAgent;
+        await runner(
+          requirement,
+          browser,
+          aiModel,
+          serializer,
+          artifactsDir,
+          false,
+          false,
+          (update) => {
+            if (mainWindow) mainWindow.webContents.send("test-step", update);
+          },
+          (checklist) => {
+            if (mainWindow)
+              mainWindow.webContents.send("test-checklist", checklist);
+          },
+          async (checklist) => {
+            if (!mainWindow) return { action: "accept" };
+            return new Promise((resolve, reject) => {
+              planApprovalPromise = { resolve, reject };
+              mainWindow?.webContents.send("plan-approval-request", checklist);
+            });
+          },
+          async (checklist) => {
+            if (!mainWindow) return { action: "validate" };
+            return new Promise((resolve, reject) => {
+              goalValidationPromise = { resolve, reject };
+              mainWindow?.webContents.send("execution-finished", checklist);
+            });
+          },
+          (planning) => {
+            if (mainWindow)
+              mainWindow.webContents.send("test-planning-state", planning);
+          },
+          async (checklist) => {
+            if (!mainWindow) return { action: "resume" };
+            if (!isPaused) return { action: "resume" };
 
-      if (mainWindow) {
-        mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration, suitePath });
-      }
-    } catch (error: any) {
-      console.error("Test execution failed:", error);
-      if (mainWindow) {
+            return new Promise((resolve, reject) => {
+              pausePromise = { resolve, reject };
+              mainWindow?.webContents.send("pause-request", checklist);
+            });
+          },
+          sessionScreenshotsDir,
+          (issues) => {
+            if (mainWindow) mainWindow.webContents.send("test-issues", issues);
+          },
+          activeTestController.signal,
+          modelSupportsVision,
+          !config.requirePlanApproval,
+          appId,
+        );
+
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-        mainWindow.webContents.send("test-complete", {
-          success: false,
-          error: error.message,
-          duration: totalDuration,
-        });
-        mainWindow.webContents.send("test-step", {
-          id: "error",
-          step: "Execution Error",
-          status: "failed",
-          duration: "ERR",
-          description: error.message,
-        });
+
+        // Link result to test ID if provided
+        if (testId) {
+          const tests = await data.listTests();
+          const testIndex = tests.findIndex((t) => t.id === testId);
+          if (testIndex !== -1) {
+            tests[testIndex].lastRunPath = suitePath;
+            await data.saveTests(tests);
+          }
+        }
+
+        // Generate markdown report
+        const testData = serializer.getTest();
+        if (testData) {
+          const reportFileName = path
+            .basename(suitePath)
+            .replace(".json", ".report.md");
+          await generateMarkdownReport(testData, suitesDir, reportFileName);
+        }
+
+        if (mainWindow) {
+          mainWindow.webContents.send("test-complete", {
+            success: true,
+            duration: totalDuration,
+            suitePath,
+          });
+        }
+      } catch (error: any) {
+        console.error("Test execution failed:", error);
+        if (mainWindow) {
+          const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
+          mainWindow.webContents.send("test-complete", {
+            success: false,
+            error: error.message,
+            duration: totalDuration,
+          });
+          mainWindow.webContents.send("test-step", {
+            id: "error",
+            step: "Execution Error",
+            status: "failed",
+            duration: "ERR",
+            description: error.message,
+          });
+        }
+      } finally {
+        await browser.close();
+        activeTestController = null;
       }
-    } finally {
-      await browser.close();
-      activeTestController = null;
-    }
-  });
+    },
+  );
 
   ipcMain.on("stop-test", () => {
     if (activeTestController) activeTestController.abort();
     isPaused = false;
     if (planApprovalPromise) {
-      planApprovalPromise.resolve({ action: 'reject' });
+      planApprovalPromise.resolve({ action: "reject" });
       planApprovalPromise = null;
     }
     if (goalValidationPromise) {
-      goalValidationPromise.resolve({ action: 'cancel' });
+      goalValidationPromise.resolve({ action: "cancel" });
       goalValidationPromise = null;
     }
     if (pausePromise) {
-      pausePromise.resolve({ action: 'resume' });
+      pausePromise.resolve({ action: "resume" });
       pausePromise = null;
     }
   });
@@ -264,41 +323,73 @@ app.whenReady().then(async () => {
   ipcMain.on("replay-test", async (event, { suitePath } = {}) => {
     const browser = new BrowserManager();
     const testStartTime = Date.now();
-    const targetPath = suitePath || path.join(app.getPath("userData"), "last-run.json");
+    const targetPath =
+      suitePath || path.join(app.getPath("userData"), "last-run.json");
     activeTestController = new AbortController();
-    
+
     const config = await data.getConfig();
-    const modelConfig = config.models.find(m => m.id === config.defaultModelId) || config.models[0];
+    const modelConfig =
+      config.models.find((m) => m.id === config.defaultModelId) ||
+      config.models[0];
     if (!modelConfig) {
-      throw new Error("No intelligence models are configured. Please go to Settings and add at least one AI model before running tests.");
+      throw new Error(
+        "No LLMs are configured. Please go to Settings and add at least one AI model before running tests.",
+      );
     }
     const aiModel = createModel(modelConfig);
-    const modelSupportsVision = config.visualFirst && isVisionModel(modelConfig.provider, modelConfig.modelName, modelConfig.supportsVision);
+    const modelSupportsVision =
+      config.visualFirst &&
+      isVisionModel(
+        modelConfig.provider,
+        modelConfig.modelName,
+        modelConfig.supportsVision,
+      );
 
     try {
       await browser.init(config.headless || false);
-      await replayTest(targetPath, browser, aiModel, undefined, false, false, (update) => {
-        if (mainWindow) mainWindow.webContents.send("test-step", update);
-      }, (checklist) => {
-        if (mainWindow) mainWindow.webContents.send("test-checklist", checklist);
-      }, (isPlanning: boolean) => {
-        if (mainWindow) mainWindow.webContents.send("test-planning-state", isPlanning);
-      }, activeTestController.signal, modelSupportsVision, !config.requirePlanApproval);
+      await replayTest(
+        targetPath,
+        browser,
+        aiModel,
+        undefined,
+        false,
+        false,
+        (update) => {
+          if (mainWindow) mainWindow.webContents.send("test-step", update);
+        },
+        (checklist) => {
+          if (mainWindow)
+            mainWindow.webContents.send("test-checklist", checklist);
+        },
+        (isPlanning: boolean) => {
+          if (mainWindow)
+            mainWindow.webContents.send("test-planning-state", isPlanning);
+        },
+        activeTestController.signal,
+        modelSupportsVision,
+        !config.requirePlanApproval,
+      );
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-        mainWindow.webContents.send("test-complete", { success: true, duration: totalDuration });
+        mainWindow.webContents.send("test-complete", {
+          success: true,
+          duration: totalDuration,
+        });
       }
     } catch (error: any) {
       if (mainWindow) {
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-        mainWindow.webContents.send("test-complete", { success: false, error: error.message, duration: totalDuration });
+        mainWindow.webContents.send("test-complete", {
+          success: false,
+          error: error.message,
+          duration: totalDuration,
+        });
       }
     } finally {
       await browser.close();
       activeTestController = null;
     }
   });
-
 
   ipcMain.handle("get-suite", async (event, suitePath) => {
     try {
@@ -348,14 +439,14 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("delete-application", async (event, appId) => {
     const apps = await data.listApplications();
-    const filteredApps = apps.filter(a => a.id !== appId);
+    const filteredApps = apps.filter((a) => a.id !== appId);
     await data.saveApplications(filteredApps);
-    
+
     // Also delete associated tests
     const tests = await data.listTests();
-    const remainingTests = tests.filter(t => t.appId !== appId);
+    const remainingTests = tests.filter((t) => t.appId !== appId);
     await data.saveTests(remainingTests);
-    
+
     return { success: true };
   });
 
@@ -364,25 +455,28 @@ app.whenReady().then(async () => {
     return await data.listTests(appId);
   });
 
-  ipcMain.handle("create-test", async (event, { appId, name, url, requirement, model }) => {
-    const tests = await data.listTests();
-    const newTest: data.Test = {
-      id: `test-${Date.now()}`,
-      appId,
-      name,
-      url,
-      requirement,
-      model,
-      createdAt: Date.now(),
-    };
-    tests.push(newTest);
-    await data.saveTests(tests);
-    return newTest;
-  });
+  ipcMain.handle(
+    "create-test",
+    async (event, { appId, name, url, requirement, model }) => {
+      const tests = await data.listTests();
+      const newTest: data.Test = {
+        id: `test-${Date.now()}`,
+        appId,
+        name,
+        url,
+        requirement,
+        model,
+        createdAt: Date.now(),
+      };
+      tests.push(newTest);
+      await data.saveTests(tests);
+      return newTest;
+    },
+  );
 
   ipcMain.handle("update-test", async (event, { testId, config }) => {
     const tests = await data.listTests();
-    const index = tests.findIndex(t => t.id === testId);
+    const index = tests.findIndex((t) => t.id === testId);
     if (index !== -1) {
       tests[index] = { ...tests[index], ...config };
       await data.saveTests(tests);
@@ -393,14 +487,14 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("delete-test", async (event, testId) => {
     const tests = await data.listTests();
-    const filteredTests = tests.filter(t => t.id !== testId);
+    const filteredTests = tests.filter((t) => t.id !== testId);
     await data.saveTests(filteredTests);
     return { success: true };
   });
 
   ipcMain.handle("get-test", async (event, testId) => {
     const tests = await data.listTests();
-    return tests.find(t => t.id === testId);
+    return tests.find((t) => t.id === testId);
   });
 
   // Configuration Management
@@ -410,6 +504,46 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("save-config", async (event, config) => {
     await data.saveConfig(config);
+    return { success: true };
+  });
+
+  // Variables Management
+  ipcMain.handle("list-variables", async (event, appId) => {
+    return await data.listVariables(appId);
+  });
+
+  ipcMain.handle("create-variable", async (event, { appId, name, type, value, purpose, expiry }) => {
+    const variables = await data.listVariables();
+    const newVar = {
+      id: `var-${Date.now()}`,
+      appId,
+      name,
+      type,
+      value,
+      purpose,
+      expiry,
+      createdAt: Date.now(),
+    };
+    variables.push(newVar);
+    await data.saveVariables(variables);
+    return newVar;
+  });
+
+  ipcMain.handle("update-variable", async (event, { varId, config }) => {
+    const variables = await data.listVariables();
+    const index = variables.findIndex((v) => v.id === varId);
+    if (index !== -1) {
+      variables[index] = { ...variables[index], ...config };
+      await data.saveVariables(variables);
+      return variables[index];
+    }
+    throw new Error("Variable not found");
+  });
+
+  ipcMain.handle("delete-variable", async (event, varId) => {
+    const variables = await data.listVariables();
+    const filteredVariables = variables.filter((v) => v.id !== varId);
+    await data.saveVariables(filteredVariables);
     return { success: true };
   });
 
@@ -431,13 +565,16 @@ app.whenReady().then(async () => {
             message: report.error.message,
             type: report.error.type,
             url: report.environment.url,
-            path: path.join(errorBaseDir, dir)
+            path: path.join(errorBaseDir, dir),
           });
         } catch (e) {
           // Skip if no report.json
         }
       }
-      return errors.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      return errors.sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
     } catch (error) {
       return [];
     }
@@ -446,15 +583,26 @@ app.whenReady().then(async () => {
   ipcMain.handle("get-agent-error", async (event, errorId) => {
     const errorDir = path.join(app.getPath("userData"), "errors", errorId);
     try {
-      const reportContent = await fs.readFile(path.join(errorDir, "report.json"), "utf-8");
+      const reportContent = await fs.readFile(
+        path.join(errorDir, "report.json"),
+        "utf-8",
+      );
       const report = JSON.parse(reportContent);
-      
+
       let snapshot = "";
-      try { snapshot = await fs.readFile(path.join(errorDir, "snapshot.txt"), "utf-8"); } catch (e) {}
-      
+      try {
+        snapshot = await fs.readFile(
+          path.join(errorDir, "snapshot.txt"),
+          "utf-8",
+        );
+      } catch (e) {}
+
       let axTree = null;
-      try { 
-        const axTreeContent = await fs.readFile(path.join(errorDir, "axtree.json"), "utf-8");
+      try {
+        const axTreeContent = await fs.readFile(
+          path.join(errorDir, "axtree.json"),
+          "utf-8",
+        );
         axTree = JSON.parse(axTreeContent);
       } catch (e) {}
 
@@ -463,7 +611,7 @@ app.whenReady().then(async () => {
         id: errorId,
         snapshot,
         axTree,
-        screenshotPath: path.join(errorDir, "screenshot.png")
+        screenshotPath: path.join(errorDir, "screenshot.png"),
       };
     } catch (error) {
       throw error;
