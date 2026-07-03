@@ -3,3 +3,6 @@
 ✔ variables to be saved as part of application @done(26-06-30 17:11)
 ☐ list of variables to be provided upon initial planning
 ☐ UI for declaring and managing variables
+☐ Expiry should be a date and variables to expire after given date. UI to provide intuitive date selection or tags like in 5 mins, 2hrs days etc
+☐ Variable storage & acquisition scripts
+☐ 
