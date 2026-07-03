@@ -3,6 +3,7 @@ import { BrowserManager } from "./browser";
 import { TestSerializer } from "./recorder";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { z } from "zod";
 import { evaluateAssertions } from "./replay";
 import { saveAgentErrorReport, type TokenBreakdown } from "./error_logger";
 import { prepareImagePart, getProviderOptions, generateObjectWithTimeout } from "./utils";
@@ -82,6 +83,10 @@ export async function runVisualAgent(
   );
   const executionPromptTemplate = await fs.readFile(
     path.join(__dirname, "prompts", "visual-execution.txt"),
+    "utf-8",
+  );
+  const searchPromptTemplate = await fs.readFile(
+    path.join(__dirname, "prompts", "visual-search.txt"),
     "utf-8",
   );
   const assertionPromptTemplate = await fs.readFile(
@@ -347,6 +352,71 @@ export async function runVisualAgent(
           ? `\n\nTechnical Observations:\n${consoleLogs ? `Console Logs:\n${consoleLogs}\n` : ""}${networkErrors ? `Network Errors:\n${networkErrors}\n` : ""}`
           : "";
 
+      // 1. Run Search Element Agent to locate initial elements needed for the task
+      console.log("[VisualAgent][Search] Running Search Element Agent...");
+
+      const searchPrompt = searchPromptTemplate
+        .replace("{taskDescription}", currentTask.description)
+        .replace("{overallGoal}", requirement);
+
+      const SearchResponseSchema = z.object({
+        currentStateDescription: z.string().describe("Description of the visual state and the elements to find"),
+        queries: z.array(z.string()).describe("Search queries to run in the DOM snapshot to find relevant elements"),
+      });
+
+      let searchResponse;
+      try {
+        const searchResult = await generateObjectWithTimeout({
+          model,
+          schema: SearchResponseSchema,
+          system: searchPrompt,
+          providerOptions: getProviderOptions(model),
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `Goal: ${requirement}\nTask: ${currentTask.description}\nURL: ${currentUrl}`,
+                },
+                ...(screenshot && supportsVision
+                  ? [prepareImagePart(screenshot)]
+                  : []),
+              ],
+            },
+          ],
+          abortSignal: signal,
+        });
+        searchResponse = searchResult.object;
+        console.log("[VisualAgent][Search] Search queries:", searchResponse.queries);
+      } catch (e: any) {
+        console.warn("[VisualAgent][Search] Search element agent failed, falling back to empty queries:", e.message);
+        searchResponse = { currentStateDescription: "Failed to determine search queries", queries: [] };
+      }
+
+      let combinedMatches: string[] = [];
+      if (searchResponse.queries && searchResponse.queries.length > 0) {
+        const lines = snapshot.split("\n");
+        for (const query of searchResponse.queries) {
+          const matches = lines.filter((line) =>
+            line.toLowerCase().includes(query.toLowerCase()),
+          );
+          combinedMatches.push(...matches);
+        }
+      }
+      // Remove duplicate lines while preserving order
+      combinedMatches = [...new Set(combinedMatches)];
+      let filteredSnapshot = combinedMatches.join("\n");
+      if (!filteredSnapshot) {
+        filteredSnapshot = "No elements found in initial search.";
+      } else {
+        filteredSnapshot = `Initial search results for elements relevant to the current task:\n\n${filteredSnapshot}`;
+      }
+
+      let currentFilteredSnapshot = filteredSnapshot;
+      let searchResultsText = `Initial Search Queries: ${JSON.stringify(searchResponse.queries || [])}\n\n${filteredSnapshot}`;
+      let afterSnapshotText = snapshot;
+
       const executionPrompt =
         executionPromptTemplate
           .replace("{taskDescription}", currentTask.description)
@@ -373,10 +443,6 @@ export async function runVisualAgent(
 
         console.log("[VisualAgent][Executor] Beginning execution turn");
 
-        // Keep snapshot hidden for LLM
-        const hiddenSnapshot =
-          "(Complete DOM snapshot hidden. Use 'search_snapshot' to locate reference IDs, or issue immediate actions.)";
-
         executionResponse = await runWithSchemaRecovery({
           model,
           schema: ExecutionResponseSchema,
@@ -388,7 +454,7 @@ export async function runVisualAgent(
             requirement,
             currentTask,
             checklist,
-            snapshot: hiddenSnapshot,
+            snapshot: currentFilteredSnapshot,
             history,
             executionPromptTemplate: executionPrompt,
             screenshot,
@@ -486,7 +552,20 @@ export async function runVisualAgent(
               screenshot: screenshotPath,
               url: currentUrl,
               action: action,
+              snapshotBefore: snapshot,
+              searchResults: `Search Query: "${query}"\n\n${resultsText}`,
+              snapshotAfter: snapshot,
             });
+          }
+
+          searchResultsText += `\n\nSearch Query: "${query}"\n${resultsText}`;
+
+          // Append new matches to the filtered snapshot
+          if (matches.length > 0) {
+            const currentLines = currentFilteredSnapshot.split("\n")
+              .filter(l => !l.startsWith("No elements found") && !l.startsWith("Initial search results") && !l.startsWith("Search results for elements"));
+            const newFilteredLines = [...currentLines, ...matches];
+            currentFilteredSnapshot = `Search results for elements relevant to the current task:\n\n${[...new Set(newFilteredLines)].join("\n")}`;
           }
 
           // Perform another execution turn in-place
@@ -524,6 +603,14 @@ export async function runVisualAgent(
       } else {
         try {
           await browser.execute(action);
+
+          // Get snapshot after action has completed
+          try {
+            const afterSnapshotObj = await browser.getSnapshotForLLM(false, false, fullSnapshot);
+            afterSnapshotText = afterSnapshotObj.text;
+          } catch (snapshotError) {
+            console.warn("[VisualAgent] Failed to retrieve after-snapshot:", snapshotError);
+          }
 
           if (serializer && executionResponse.previousActionResult) {
             serializer.updatePreviousResult(
@@ -717,6 +804,9 @@ export async function runVisualAgent(
           screenshot: screenshotPath,
           url: currentUrl,
           action: action,
+          snapshotBefore: snapshot,
+          searchResults: searchResultsText,
+          snapshotAfter: afterSnapshotText,
         });
       }
 

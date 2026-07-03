@@ -47,4 +47,7 @@ export interface AgentStepUpdate {
   action?: any;
   issues?: { description: string; severity: string }[];
   url?: string;
+  snapshotBefore?: string;
+  searchResults?: string;
+  snapshotAfter?: string;
 }

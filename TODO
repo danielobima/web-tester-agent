@@ -41,6 +41,8 @@
 ✔ Telling the user that the goal was acheived is a bit misleading if there were issues found, maybe we just say execution completed or something similar @done(26-05-13 12:55)
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
+☐ Task classification: see task-classification.TODO
+☐ Show total token usage
 ☐ Logging should be formatted in a way that it can be used for finetuning the lower param models
 ☐ Fix tab not found error when an existing chrome window is open - Also unable to know which tab is active
 ☐ Implement a wait command - Test
