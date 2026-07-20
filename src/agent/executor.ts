@@ -3,6 +3,7 @@ import { type AgentHistoryMessage } from "./types";
 import { ExecutionResponseSchema, type Checklist, type ExecutionResponse } from "../actions";
 import { TestSerializer } from "../recorder";
 import { prepareImagePart, getProviderOptions, generateObjectWithTimeout } from "../utils";
+import { type ZodType } from "zod";
 
 export async function executeTask(params: {
   model: LanguageModel;
@@ -17,6 +18,7 @@ export async function executeTask(params: {
   consecutiveSameAction?: number;
   serializer?: TestSerializer;
   abortSignal?: AbortSignal;
+  schema?: ZodType<ExecutionResponse>;
 }): Promise<ExecutionResponse> {
   const currentIssues =
     params.serializer?.getTest()?.issues || params.checklist.issues || [];
@@ -41,7 +43,7 @@ export async function executeTask(params: {
 
   const result = await generateObjectWithTimeout({
     model: params.model,
-    schema: ExecutionResponseSchema,
+    schema: params.schema || ExecutionResponseSchema,
     system: executionPrompt,
     providerOptions: getProviderOptions(params.model),
     messages: [

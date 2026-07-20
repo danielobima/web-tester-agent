@@ -35,6 +35,7 @@ import {
   ExecutionResponseSchema,
   AssertionAgentResponse,
   AssertionAgentResponseSchema,
+  getExecutionResponseSchema,
 } from "./actions";
 
 // Re-export for compatibility with other files (benchmark-mind2web.ts, cli.ts, etc.)
@@ -390,18 +391,29 @@ export async function runAgent(
           ? `\n\nTechnical Observations:\n${consoleLogs ? `Console Logs:\n${consoleLogs}\n` : ""}${networkErrors ? `Network Errors:\n${networkErrors}\n` : ""}`
           : "";
 
+      const taskType = (currentTask as any).type || "general";
+      let taskPromptTemplate = executionPromptTemplate;
+      try {
+        const specializedPath = path.join(__dirname, "prompts", `execution-${taskType}.txt`);
+        const specializedContent = await fs.readFile(specializedPath, "utf-8");
+        taskPromptTemplate = specializedContent + "\n\n" + executionPromptTemplate;
+      } catch (err) {
+        taskPromptTemplate = executionPromptTemplate;
+      }
+
       const executionPrompt =
-        executionPromptTemplate
+        taskPromptTemplate
           .replace("{taskDescription}", currentTask.description)
           .replace("{overallGoal}", requirement) +
         technicalObservations +
         knownIssuesText;
       let executionResponse: ExecutionResponse | undefined;
       const actionStartTime = Date.now();
+      const specializedSchema = getExecutionResponseSchema(taskType);
 
       executionResponse = await runWithSchemaRecovery({
         model,
-        schema: ExecutionResponseSchema,
+        schema: specializedSchema,
         label: "Executor",
         history,
         abortSignal: signal,
@@ -412,12 +424,13 @@ export async function runAgent(
           checklist,
           snapshot,
           history,
-          executionPromptTemplate,
+          executionPromptTemplate: taskPromptTemplate,
           screenshot,
           supportsVision,
           consecutiveSameAction,
           serializer,
           abortSignal: signal,
+          schema: specializedSchema,
         }),
         onMaxRetriesExceeded: async (e) => {
           const currentIssues =

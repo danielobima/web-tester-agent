@@ -21,6 +21,13 @@ When generating or updating the checklist:
     * **Do NOT assume any task is completed** just because a previous step was executed.
     * You MUST **verify completion** and actively plan and execute all necessary subsequent steps until the entire objective is fully realized.
 13. Bypassing Restrictions: When verifying negative requirements (e.g., a blocked feature or disallowed action), create tasks to try all possible methods to circumvent the restriction and confirm that the system successfully blocks unauthorized attempts across all workflows.
+14. **Task Classification**: You MUST classify each task by setting the `type` field in the task schema to one of the following values:
+    * `authentication`: Login, logout, signup, OTP, MFA, terms acceptance, or cookie consent.
+    * `form_filling`: Typing into input fields, checking checkboxes, selecting dropdown options/comboboxes/radio options, and form submission.
+    * `navigation`: Page navigation, clicking links, menus, tabs, going back/forward, traversing URLs.
+    * `observer`: Waiting for elements/text to load, validating success messages, checking visual/structural states without entering form data.
+    * `data_manipulation`: Editing, deleting, list/table items management, dragging/dropping, reordering elements.
+    * `general`: Default fallback for tasks that do not fit any of the above categories.
 
 CRITICAL: If you determine that no further tasks are needed to fulfill the user's intent, you MUST set 'finished' to true. Failing to do so will result in an incomplete test report.
 
