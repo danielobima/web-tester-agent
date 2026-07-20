@@ -42,6 +42,9 @@
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
 ☐ Variables -> see Variables.TODO
+☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
+☐ LLM timeout should have retry enabled
+☐ Purge alert() and confirm() usage
 ☐ A way to setup base URL and environment(prod, staging, local etc)
 ☐ Task classification: see task-classification.TODO
 ☐ Show total token usage
@@ -54,7 +57,6 @@
 ✔ Add Intelligence model in settings to read as add LLM, simple language @done(26-06-30 16:41)
 ☐ Task classification: Instead of feeding all instructions into the execution/planning agents, we can classify common tasks and give specialised prompts to make execution more efficient
 ☐ Better Logs: I want to be able to see all prompts and all outputs from the LLM throughout the process
-☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
 ☐ Scroll interaction - Only relevant for vision models - needs testing
 ☐ Implement retry for the planning agent
 ☐ When testing negative cases "EG verify something is not..." the agent get lazy 
