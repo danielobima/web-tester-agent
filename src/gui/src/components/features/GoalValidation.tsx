@@ -9,7 +9,7 @@ interface Issue {
 
 interface Checklist {
   currentStateDescription: string;
-  tasks: { id: string; description: string; status: string; result?: string }[];
+  tasks: { id: string; description: string; type?: string; status: string; result?: string }[];
   finished: boolean;
   screenshot?: string;
   issues?: Issue[];

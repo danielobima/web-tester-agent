@@ -5,12 +5,53 @@ export interface ChecklistTask {
   description: string;
   status: 'pending' | 'completed' | 'failed';
   result?: string;
+  type?: string;
 }
 
 interface TestingPlanProps {
   tasks: ChecklistTask[];
   isPlanning?: boolean;
 }
+
+const getTypeBadge = (type?: string) => {
+  if (!type) return null;
+  
+  let styles = "bg-on-surface/5 text-on-surface/50 border-on-surface/10";
+  let label = type;
+
+  switch (type) {
+    case "authentication":
+      styles = "bg-purple-500/10 text-purple-400 border-purple-500/20";
+      label = "auth";
+      break;
+    case "form_filling":
+      styles = "bg-blue-500/10 text-blue-400 border-blue-500/20";
+      label = "form";
+      break;
+    case "navigation":
+      styles = "bg-teal-500/10 text-teal-400 border-teal-500/20";
+      label = "nav";
+      break;
+    case "observer":
+      styles = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+      label = "observe";
+      break;
+    case "data_manipulation":
+      styles = "bg-indigo-500/10 text-indigo-400 border-indigo-500/20";
+      label = "data";
+      break;
+    case "general":
+      styles = "bg-gray-500/10 text-gray-400 border-gray-500/20";
+      label = "general";
+      break;
+  }
+
+  return (
+    <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-semibold inline-block shrink-0 ${styles}`}>
+      {label}
+    </span>
+  );
+};
 
 export const TestingPlan = ({ tasks, isPlanning = false }: TestingPlanProps) => {
   return (
@@ -50,10 +91,13 @@ export const TestingPlan = ({ tasks, isPlanning = false }: TestingPlanProps) => 
                  task.status === 'failed' ? <Icons.XCircle /> : 
                  <div className="w-1.5 h-1.5 rounded-full bg-current" />}
               </div>
-              <div className="space-y-1">
-                <p className={`text-sm font-medium leading-tight ${task.status === 'completed' ? 'line-through text-on-surface/40' : ''}`}>
-                  {task.description}
-                </p>
+              <div className="space-y-1 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {getTypeBadge(task.type)}
+                  <p className={`text-sm font-medium leading-tight ${task.status === 'completed' ? 'line-through text-on-surface/40' : ''}`}>
+                    {task.description}
+                  </p>
+                </div>
                 {task.result && task.status === 'completed' && (
                    <p className="text-[11px] text-on-surface/30 italic">{task.result}</p>
                 )}

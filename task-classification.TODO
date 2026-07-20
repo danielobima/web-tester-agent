@@ -1,5 +1,5 @@
-☐ The planning agent to generate the tasks
-☐ Tasks to be classified by a different agent based on preconfigured tasks
-☐ Task class definitions: Authentication, Form, Navigation, Data Manipulation
-☐ how to save the system prompts for different task types
-☐ 
+☑ The planning agent to generate the tasks
+☑ Tasks to be classified by a different agent based on preconfigured tasks
+☑ Task class definitions: Authentication, Form, Navigation, Data Manipulation
+☑ how to save the system prompts for different task types
+☐

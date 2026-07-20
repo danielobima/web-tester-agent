@@ -4,6 +4,7 @@ import { Icons } from "../ui/Icons";
 interface Task {
   id: string;
   description: string;
+  type?: string;
   status: "pending" | "in_progress" | "completed" | "failed";
 }
 

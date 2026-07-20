@@ -42,6 +42,7 @@ import {
   ExecutionResponseSchema,
   AssertionAgentResponse,
   AssertionAgentResponseSchema,
+  getExecutionResponseSchema,
 } from "./actions";
 
 export async function runVisualAgent(
@@ -451,8 +452,40 @@ export async function runVisualAgent(
       let searchResultsText = `Initial Search Queries: ${JSON.stringify(searchResponse.queries || [])}\n\n${filteredSnapshot}`;
       let afterSnapshotText = snapshot;
 
+      const taskType = (currentTask as any).type || "general";
+      let taskPromptTemplate = executionPromptTemplate;
+      try {
+        const visualSpecializedPath = path.join(
+          __dirname,
+          "prompts",
+          `visual-execution-${taskType}.txt`,
+        );
+        const specializedContent = await fs.readFile(
+          visualSpecializedPath,
+          "utf-8",
+        );
+        taskPromptTemplate =
+          specializedContent + "\n\n" + executionPromptTemplate;
+      } catch (err) {
+        try {
+          const specializedPath = path.join(
+            __dirname,
+            "prompts",
+            `execution-${taskType}.txt`,
+          );
+          const specializedContent = await fs.readFile(
+            specializedPath,
+            "utf-8",
+          );
+          taskPromptTemplate =
+            specializedContent + "\n\n" + executionPromptTemplate;
+        } catch (e) {
+          taskPromptTemplate = executionPromptTemplate;
+        }
+      }
+
       const executionPrompt =
-        executionPromptTemplate
+        taskPromptTemplate
           .replace("{taskDescription}", currentTask.description)
           .replace("{overallGoal}", currentRequirement) + technicalObservations;
 
@@ -477,9 +510,11 @@ export async function runVisualAgent(
 
         console.log("[VisualAgent][Executor] Beginning execution turn");
 
+        const specializedSchema = getExecutionResponseSchema(taskType);
+
         executionResponse = await runWithSchemaRecovery({
           model,
-          schema: ExecutionResponseSchema,
+          schema: specializedSchema,
           label: "Executor",
           history,
           abortSignal: signal,
@@ -497,6 +532,7 @@ export async function runVisualAgent(
               consecutiveSameAction,
               serializer,
               abortSignal: signal,
+              schema: specializedSchema,
             }),
           onMaxRetriesExceeded: async (e) => {
             const tokenBreakdown = getTokenBreakdown({
