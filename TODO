@@ -43,6 +43,8 @@
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
 ☐ Variables -> see Variables.TODO
 ☐ A way to setup base URL and environment(prod, staging, local etc)
+☐ Task classification: see task-classification.TODO
+☐ Show total token usage
 ☐ Logging should be formatted in a way that it can be used for finetuning the lower param models
 ☐ Fix tab not found error when an existing chrome window is open - Also unable to know which tab is active
 ☐ Implement a wait command - Test

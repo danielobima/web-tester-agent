@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Icons } from "../ui/Icons";
 import { Carousel } from "./Carousel";
 import { FindingsSection, type Finding } from "./FindingsSection";
@@ -16,7 +16,149 @@ export interface TestStep {
   issues?: { description: string; severity: string }[];
   url?: string;
   usability?: string[];
+  snapshotBefore?: string;
+  searchResults?: string;
+  snapshotAfter?: string;
 }
+
+interface CollapsibleCodeViewerProps {
+  title: string;
+  content: string;
+  icon: React.ReactNode;
+}
+
+export const CollapsibleCodeViewer = ({ title, content, icon }: CollapsibleCodeViewerProps) => {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Escaped search pattern for regex
+  const escapedSearch = searchTerm.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const hasMinLength = searchTerm.length >= 1;
+  const regex = hasMinLength ? new RegExp(escapedSearch, 'gi') : null;
+  const matchCount = regex ? (content.match(regex) || []).length : 0;
+
+  useEffect(() => {
+    if (!searchTerm || !containerRef.current) return;
+    const activeEl = containerRef.current.querySelector(
+      `[data-match-idx="${activeMatchIndex}"]`
+    );
+    if (activeEl) {
+      activeEl.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [activeMatchIndex, searchTerm]);
+
+  const renderHighlightedContent = () => {
+    if (!regex) return content;
+
+    const parts = content.split(new RegExp(`(${escapedSearch})`, 'gi'));
+    let matchCounter = 0;
+
+    return (
+      <>
+        {parts.map((part, i) => {
+          if (regex.test(part)) {
+            const currentIdx = matchCounter++;
+            const isActive = currentIdx === activeMatchIndex;
+            return (
+              <mark
+                key={i}
+                data-match-idx={currentIdx}
+                className={`rounded-sm px-0.5 transition-all ${
+                  isActive
+                    ? "bg-primary text-white font-bold ring-1 ring-primary"
+                    : "bg-yellow-500/40 text-on-surface"
+                }`}
+              >
+                {part}
+              </mark>
+            );
+          }
+          return part;
+        })}
+      </>
+    );
+  };
+
+  return (
+    <div className="space-y-2">
+      <details className="group border border-on-surface/10 rounded-sm overflow-hidden bg-surface-low">
+        <summary className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-on-surface/60 cursor-pointer hover:bg-on-surface/5 select-none list-none flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            {icon} {title}
+          </span>
+          <span className="transition-transform duration-200 group-open:rotate-180">
+            <Icons.ChevronDown className="w-3.5 h-3.5" />
+          </span>
+        </summary>
+        <div className="p-3 border-t border-on-surface/10 bg-black/5 flex flex-col h-[350px]">
+          {/* VS Code like Search Bar */}
+          <div className="flex items-center gap-2 mb-2 p-1.5 bg-surface-low border border-on-surface/10 rounded-sm shrink-0">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                placeholder="Find..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setActiveMatchIndex(0);
+                }}
+                className="w-full bg-surface-lowest text-xs px-2.5 py-1 pr-20 rounded border border-on-surface/10 focus:border-primary focus:outline-none text-on-surface"
+              />
+              {searchTerm && (
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono text-on-surface/40 select-none">
+                  {matchCount > 0 ? `${activeMatchIndex + 1} of ${matchCount}` : "0 of 0"}
+                </span>
+              )}
+            </div>
+            
+            <button
+              disabled={matchCount <= 1}
+              onClick={() => {
+                setActiveMatchIndex((prev) => (prev - 1 + matchCount) % matchCount);
+              }}
+              className="p-1 rounded hover:bg-on-surface/5 disabled:opacity-30 disabled:hover:bg-transparent text-on-surface/60 transition-colors"
+              title="Previous Match"
+            >
+              <Icons.ChevronUp className="w-3.5 h-3.5" />
+            </button>
+            
+            <button
+              disabled={matchCount <= 1}
+              onClick={() => {
+                setActiveMatchIndex((prev) => (prev + 1) % matchCount);
+              }}
+              className="p-1 rounded hover:bg-on-surface/5 disabled:opacity-30 disabled:hover:bg-transparent text-on-surface/60 transition-colors"
+              title="Next Match"
+            >
+              <Icons.ChevronDown className="w-3.5 h-3.5" />
+            </button>
+
+            {searchTerm && (
+              <button
+                onClick={() => {
+                  setSearchTerm("");
+                  setActiveMatchIndex(0);
+                }}
+                className="p-1 rounded hover:bg-on-surface/5 text-on-surface/60 transition-colors"
+                title="Clear Search"
+              >
+                <Icons.Close className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div ref={containerRef} className="flex-1 overflow-y-auto bg-black/10 rounded p-2">
+            <pre className="text-[10px] font-mono whitespace-pre-wrap text-on-surface/75">{renderHighlightedContent()}</pre>
+          </div>
+        </div>
+      </details>
+    </div>
+  );
+};
 
 interface ExecutionStreamProps {
   results: TestStep[];
@@ -146,6 +288,41 @@ export const ExecutionStream = ({
                               alt="Step State"
                             />
                           </div>
+                        )}
+
+                        {result.action && (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-on-surface/30">
+                              <Icons.Code className="w-3.5 h-3.5" /> Action JSON Payload
+                            </div>
+                            <pre className="p-3 bg-black/5 rounded border border-on-surface/10 text-[10px] font-mono whitespace-pre-wrap text-on-surface/75">
+                              {JSON.stringify(result.action, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+
+                        {result.snapshotBefore && (
+                          <CollapsibleCodeViewer
+                            title="DOM Snapshot Before Action"
+                            content={result.snapshotBefore}
+                            icon={<Icons.Code className="w-3.5 h-3.5" />}
+                          />
+                        )}
+
+                        {result.searchResults && (
+                          <CollapsibleCodeViewer
+                            title="Snapshot Search Results"
+                            content={result.searchResults}
+                            icon={<Icons.Search className="w-3.5 h-3.5" />}
+                          />
+                        )}
+
+                        {result.snapshotAfter && (
+                          <CollapsibleCodeViewer
+                            title="DOM Snapshot After Action"
+                            content={result.snapshotAfter}
+                            icon={<Icons.Code className="w-3.5 h-3.5" />}
+                          />
                         )}
 
                         {result.issues && result.issues.length > 0 && (

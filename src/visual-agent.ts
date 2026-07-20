@@ -4,9 +4,14 @@ import { TestSerializer } from "./recorder";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as data from "./data";
+import { z } from "zod";
 import { evaluateAssertions } from "./replay";
 import { saveAgentErrorReport, type TokenBreakdown } from "./error_logger";
-import { prepareImagePart, getProviderOptions, generateObjectWithTimeout } from "./utils";
+import {
+  prepareImagePart,
+  getProviderOptions,
+  generateObjectWithTimeout,
+} from "./utils";
 
 import {
   AgentHistoryMessage,
@@ -87,6 +92,10 @@ export async function runVisualAgent(
     path.join(__dirname, "prompts", "visual-execution.txt"),
     "utf-8",
   );
+  const searchPromptTemplate = await fs.readFile(
+    path.join(__dirname, "prompts", "visual-search.txt"),
+    "utf-8",
+  );
   const assertionPromptTemplate = await fs.readFile(
     path.join(__dirname, "prompts", "visual-assertion.txt"),
     "utf-8",
@@ -110,7 +119,10 @@ export async function runVisualAgent(
       let currentRequirement = requirement;
       if (activeVariables.length > 0) {
         const formattedVars = activeVariables
-          .map((v) => `- ${v.name} (${v.type}): ${v.value} [Purpose: ${v.purpose}]`)
+          .map(
+            (v) =>
+              `- ${v.name} (${v.type}): ${v.value} [Purpose: ${v.purpose}]`,
+          )
           .join("\n");
         currentRequirement += `\n\nAvailable Application Variables:\n${formattedVars}`;
       }
@@ -172,17 +184,18 @@ export async function runVisualAgent(
         label: "Planner",
         history,
         abortSignal: signal,
-        taskFn: () => planTask({
-          model,
-          requirement: currentRequirement,
-          checklist,
-          snapshot: visualStateSnapshot,
-          history,
-          planningPrompt,
-          screenshot,
-          supportsVision,
-          abortSignal: signal,
-        }),
+        taskFn: () =>
+          planTask({
+            model,
+            requirement: currentRequirement,
+            checklist,
+            snapshot: visualStateSnapshot,
+            history,
+            planningPrompt,
+            screenshot,
+            supportsVision,
+            abortSignal: signal,
+          }),
         onMaxRetriesExceeded: async (e) => {
           if (onPlanning) onPlanning(false);
           const tokenBreakdown = getTokenBreakdown({
@@ -214,7 +227,7 @@ export async function runVisualAgent(
               browser,
             );
           }
-        }
+        },
       });
 
       console.log("[VisualAgent][Planner] Planning result:", checklist);
@@ -358,6 +371,86 @@ export async function runVisualAgent(
           ? `\n\nTechnical Observations:\n${consoleLogs ? `Console Logs:\n${consoleLogs}\n` : ""}${networkErrors ? `Network Errors:\n${networkErrors}\n` : ""}`
           : "";
 
+      // 1. Run Search Element Agent to locate initial elements needed for the task
+      console.log("[VisualAgent][Search] Running Search Element Agent...");
+
+      const searchPrompt = searchPromptTemplate
+        .replace("{taskDescription}", currentTask.description)
+        .replace("{overallGoal}", requirement);
+
+      const SearchResponseSchema = z.object({
+        currentStateDescription: z
+          .string()
+          .describe("Description of the visual state and the elements to find"),
+        queries: z
+          .array(z.string())
+          .describe(
+            "Search queries to run in the DOM snapshot to find relevant elements",
+          ),
+      });
+
+      let searchResponse;
+      try {
+        const searchResult = await generateObjectWithTimeout({
+          model,
+          schema: SearchResponseSchema,
+          system: searchPrompt,
+          providerOptions: getProviderOptions(model),
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `Goal: ${requirement}\nTask: ${currentTask.description}\nURL: ${currentUrl}`,
+                },
+                ...(screenshot && supportsVision
+                  ? [prepareImagePart(screenshot)]
+                  : []),
+              ],
+            },
+          ],
+          abortSignal: signal,
+        });
+        searchResponse = searchResult.object;
+        console.log(
+          "[VisualAgent][Search] Search queries:",
+          searchResponse.queries,
+        );
+      } catch (e: any) {
+        console.warn(
+          "[VisualAgent][Search] Search element agent failed, falling back to empty queries:",
+          e.message,
+        );
+        searchResponse = {
+          currentStateDescription: "Failed to determine search queries",
+          queries: [],
+        };
+      }
+
+      let combinedMatches: string[] = [];
+      if (searchResponse.queries && searchResponse.queries.length > 0) {
+        const lines = snapshot.split("\n");
+        for (const query of searchResponse.queries) {
+          const matches = lines.filter((line) =>
+            line.toLowerCase().includes(query.toLowerCase()),
+          );
+          combinedMatches.push(...matches);
+        }
+      }
+      // Remove duplicate lines while preserving order
+      combinedMatches = [...new Set(combinedMatches)];
+      let filteredSnapshot = combinedMatches.join("\n");
+      if (!filteredSnapshot) {
+        filteredSnapshot = "No elements found in initial search.";
+      } else {
+        filteredSnapshot = `Initial search results for elements relevant to the current task:\n\n${filteredSnapshot}`;
+      }
+
+      let currentFilteredSnapshot = filteredSnapshot;
+      let searchResultsText = `Initial Search Queries: ${JSON.stringify(searchResponse.queries || [])}\n\n${filteredSnapshot}`;
+      let afterSnapshotText = snapshot;
+
       const executionPrompt =
         executionPromptTemplate
           .replace("{taskDescription}", currentTask.description)
@@ -384,30 +477,27 @@ export async function runVisualAgent(
 
         console.log("[VisualAgent][Executor] Beginning execution turn");
 
-        // Keep snapshot hidden for LLM
-        const hiddenSnapshot =
-          "(Complete DOM snapshot hidden. Use 'search_snapshot' to locate reference IDs, or issue immediate actions.)";
-
         executionResponse = await runWithSchemaRecovery({
           model,
           schema: ExecutionResponseSchema,
           label: "Executor",
           history,
           abortSignal: signal,
-          taskFn: () => executeTask({
-            model,
-            requirement: currentRequirement,
-            currentTask,
-            checklist,
-            snapshot: hiddenSnapshot,
-            history,
-            executionPromptTemplate: executionPrompt,
-            screenshot,
-            supportsVision,
-            consecutiveSameAction,
-            serializer,
-            abortSignal: signal,
-          }),
+          taskFn: () =>
+            executeTask({
+              model,
+              requirement: currentRequirement,
+              currentTask,
+              checklist,
+              snapshot: currentFilteredSnapshot,
+              history,
+              executionPromptTemplate: executionPrompt,
+              screenshot,
+              supportsVision,
+              consecutiveSameAction,
+              serializer,
+              abortSignal: signal,
+            }),
           onMaxRetriesExceeded: async (e) => {
             const tokenBreakdown = getTokenBreakdown({
               systemPrompt: executionPrompt,
@@ -440,7 +530,7 @@ export async function runVisualAgent(
                 browser,
               );
             }
-          }
+          },
         });
 
         const action = executionResponse.action;
@@ -461,8 +551,7 @@ export async function runVisualAgent(
           if (matches.length === 0) {
             resultsText = `No elements found matching "${query}". Try searching for HTML roles (e.g. "button", "textbox"), text labels, or broad categories.`;
           } else {
-            resultsText =
-              matches.join("\n");
+            resultsText = matches.join("\n");
           }
 
           // Record turn in history so LLM gets it
@@ -497,7 +586,26 @@ export async function runVisualAgent(
               screenshot: screenshotPath,
               url: currentUrl,
               action: action,
+              snapshotBefore: snapshot,
+              searchResults: `Search Query: "${query}"\n\n${resultsText}`,
+              snapshotAfter: snapshot,
             });
+          }
+
+          searchResultsText += `\n\nSearch Query: "${query}"\n${resultsText}`;
+
+          // Append new matches to the filtered snapshot
+          if (matches.length > 0) {
+            const currentLines = currentFilteredSnapshot
+              .split("\n")
+              .filter(
+                (l) =>
+                  !l.startsWith("No elements found") &&
+                  !l.startsWith("Initial search results") &&
+                  !l.startsWith("Search results for elements"),
+              );
+            const newFilteredLines = [...currentLines, ...matches];
+            currentFilteredSnapshot = `Search results for elements relevant to the current task:\n\n${[...new Set(newFilteredLines)].join("\n")}`;
           }
 
           // Perform another execution turn in-place
@@ -540,17 +648,33 @@ export async function runVisualAgent(
                 extractedValue = await locator.inputValue().catch(() => "");
               }
             } else if (action.selector) {
-              extractedValue = await browser.page?.locator(action.selector).first().innerText().catch(() => "") || "";
+              extractedValue =
+                (await browser.page
+                  ?.locator(action.selector)
+                  .first()
+                  .innerText()
+                  .catch(() => "")) || "";
               if (!extractedValue) {
-                extractedValue = await browser.page?.locator(action.selector).first().inputValue().catch(() => "") || "";
+                extractedValue =
+                  (await browser.page
+                    ?.locator(action.selector)
+                    .first()
+                    .inputValue()
+                    .catch(() => "")) || "";
               }
             } else {
-              extractedValue = await browser.page?.locator("body").innerText().catch(() => "") || "";
+              extractedValue =
+                (await browser.page
+                  ?.locator("body")
+                  .innerText()
+                  .catch(() => "")) || "";
             }
           } else if (action.source === "network_logs") {
-            extractedValue = browser.networkLogs.map(n => `[${n.method}] ${n.url} (${n.status})`).join("\n");
+            extractedValue = browser.networkLogs
+              .map((n) => `[${n.method}] ${n.url} (${n.status})`)
+              .join("\n");
           } else if (action.source === "console_logs") {
-            extractedValue = browser.consoleLogs.map(l => l.text).join("\n");
+            extractedValue = browser.consoleLogs.map((l) => l.text).join("\n");
           }
 
           if (action.regex) {
@@ -558,17 +682,24 @@ export async function runVisualAgent(
             if (match) {
               extractedValue = match[1] || match[0];
             } else {
-              console.warn(`[VisualAgent] Regex '${action.regex}' did not match extracted content.`);
+              console.warn(
+                `[VisualAgent] Regex '${action.regex}' did not match extracted content.`,
+              );
             }
           }
 
-          console.log(`[VisualAgent] Extracted variable '${action.name}' value: '${extractedValue}'`);
+          console.log(
+            `[VisualAgent] Extracted variable '${action.name}' value: '${extractedValue}'`,
+          );
 
           if (appId) {
             const vars = await data.listVariables(appId);
-            const existingIndex = vars.findIndex(v => v.name === action.name);
+            const existingIndex = vars.findIndex((v) => v.name === action.name);
             const updatedVar: data.Variable = {
-              id: existingIndex !== -1 ? vars[existingIndex].id : `var-${Date.now()}`,
+              id:
+                existingIndex !== -1
+                  ? vars[existingIndex].id
+                  : `var-${Date.now()}`,
               appId,
               name: action.name,
               type: action.type || "string",
@@ -585,9 +716,14 @@ export async function runVisualAgent(
             await data.saveVariables(vars);
             activeVariables = vars;
           } else {
-            const existingIndex = activeVariables.findIndex(v => v.name === action.name);
+            const existingIndex = activeVariables.findIndex(
+              (v) => v.name === action.name,
+            );
             const updatedVar: data.Variable = {
-              id: existingIndex !== -1 ? activeVariables[existingIndex].id : `var-${Date.now()}`,
+              id:
+                existingIndex !== -1
+                  ? activeVariables[existingIndex].id
+                  : `var-${Date.now()}`,
               appId: "cli",
               name: action.name,
               type: action.type || "string",
@@ -641,9 +777,10 @@ export async function runVisualAgent(
             });
             await serializer.saveTest();
           }
-
         } catch (e: any) {
-          console.error(`[VisualAgent] Failed to create variable: ${e.message}`);
+          console.error(
+            `[VisualAgent] Failed to create variable: ${e.message}`,
+          );
           executionResponse.previousActionResult = `Failed to create variable: ${e.message}`;
           executionResponse.isTaskComplete = false;
         }
@@ -655,6 +792,21 @@ export async function runVisualAgent(
       } else {
         try {
           await browser.execute(action);
+
+          // Get snapshot after action has completed
+          try {
+            const afterSnapshotObj = await browser.getSnapshotForLLM(
+              false,
+              false,
+              fullSnapshot,
+            );
+            afterSnapshotText = afterSnapshotObj.text;
+          } catch (snapshotError) {
+            console.warn(
+              "[VisualAgent] Failed to retrieve after-snapshot:",
+              snapshotError,
+            );
+          }
 
           if (serializer && executionResponse.previousActionResult) {
             serializer.updatePreviousResult(
@@ -706,7 +858,9 @@ export async function runVisualAgent(
             history: assertionHistory,
             abortSignal: signal,
             taskFn: async () => {
-              console.log(`[VisualAgent][Asserter] Verifying task completion...`);
+              console.log(
+                `[VisualAgent][Asserter] Verifying task completion...`,
+              );
               const assertionResult = await generateObjectWithTimeout({
                 model,
                 schema: AssertionAgentResponseSchema,
@@ -735,15 +889,8 @@ export async function runVisualAgent(
               const res = assertionResult.object;
               console.log(`[VisualAgent][Asserter] Response: `, res);
 
-              if (
-                serializer &&
-                res.issues &&
-                res.issues.length > 0
-              ) {
-                serializer.logFindings(
-                  `step - ${stepCounter} `,
-                  res.issues,
-                );
+              if (serializer && res.issues && res.issues.length > 0) {
+                serializer.logFindings(`step - ${stepCounter} `, res.issues);
                 if (onIssuesUpdate)
                   onIssuesUpdate(serializer.getTest()?.issues || []);
               }
@@ -755,10 +902,7 @@ export async function runVisualAgent(
               );
               const afterRefs = afterAx.refs;
 
-              if (
-                res.assertions &&
-                Array.isArray(res.assertions)
-              ) {
+              if (res.assertions && Array.isArray(res.assertions)) {
                 for (const ass of res.assertions) {
                   mapRefsToIdentifiers(ass, afterRefs);
                 }
@@ -771,7 +915,9 @@ export async function runVisualAgent(
 
                 if (failures.length > 0) {
                   isVerified = false;
-                  throw new Error(`The assertions you generated failed programmatic verification: ${failures.join("\n")}`);
+                  throw new Error(
+                    `The assertions you generated failed programmatic verification: ${failures.join("\n")}`,
+                  );
                 }
               }
 
@@ -779,17 +925,21 @@ export async function runVisualAgent(
             },
             onMaxRetriesExceeded: (e) => {
               isVerified = false;
-            }
+            },
           });
         } catch (error: any) {
-          console.warn(`[VisualAgent][Asserter] ⚠️ Verification failed but continuing:`, error.message);
+          console.warn(
+            `[VisualAgent][Asserter] ⚠️ Verification failed but continuing:`,
+            error.message,
+          );
           isVerified = false;
           assertionResponse = {
-            currentStateDescription: "Failed to programmatically verify task completion.",
+            currentStateDescription:
+              "Failed to programmatically verify task completion.",
             assertions: [],
             isTaskVerified: false,
             verificationReasoning: `Programmatic verification of assertions failed. Continuing anyway. Details: ${error.message}`,
-            issues: []
+            issues: [],
           };
         }
 
@@ -848,6 +998,9 @@ export async function runVisualAgent(
           screenshot: screenshotPath,
           url: currentUrl,
           action: action,
+          snapshotBefore: snapshot,
+          searchResults: searchResultsText,
+          snapshotAfter: afterSnapshotText,
         });
       }
 
