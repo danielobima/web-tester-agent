@@ -28,32 +28,52 @@ export interface TestStep {
   stateSnapshot?: string;
   axTree?: any;
   issues?: { description: string; severity: "low" | "medium" | "high" | "critical" }[];
+  usedVariables?: string[];
 }
 
 export interface SerializedTest {
   id: string;
+  appId?: string;
   name: string;
   startUrl: string;
   checklist?: Checklist;
   steps: TestStep[];
   originalSteps?: TestStep[];
   issues: Issue[];
+  variables?: Record<string, string>;
 }
 
 export class TestSerializer {
   private test: SerializedTest | null = null;
   private stepCounter = 0;
   private activeOutPath: string | null = null;
+  private variables: Record<string, string> = {};
 
-  startTest(name: string, startUrl: string) {
+  startTest(name: string, startUrl: string, appId?: string) {
     this.test = {
       id: `test-${Date.now()}`,
+      appId,
       name,
       startUrl,
       steps: [],
       issues: [],
     };
     this.stepCounter = 0;
+    this.variables = {};
+  }
+
+  setVariables(variables: any) {
+    if (Array.isArray(variables)) {
+      const map: Record<string, string> = {};
+      for (const v of variables) {
+        if (v && v.name) {
+          map[v.name] = v.value;
+        }
+      }
+      this.variables = map;
+    } else if (variables) {
+      this.variables = { ...variables };
+    }
   }
 
   setOutPath(filePath: string) {
@@ -71,6 +91,7 @@ export class TestSerializer {
       stateSnapshot?: string;
       axTree?: any;
       issues?: { description: string; severity: "low" | "medium" | "high" | "critical" }[];
+      usedVariables?: string[];
     },
   ) {
     if (!this.test) throw new Error("Test not started");
@@ -87,6 +108,7 @@ export class TestSerializer {
       stateSnapshot: options?.stateSnapshot,
       axTree: options?.axTree,
       issues: options?.issues,
+      usedVariables: options?.usedVariables,
     });
 
     if (options?.issues) {
@@ -191,6 +213,8 @@ export class TestSerializer {
       return;
     }
 
+    this.test.variables = this.variables;
+
     const baseDir = path.dirname(targetPath);
     try {
       console.log(`[TestSerializer] Saving test to: ${targetPath}`);
@@ -205,6 +229,9 @@ export class TestSerializer {
     const data = await fs.readFile(filePath, "utf-8");
     this.test = JSON.parse(data);
     this.stepCounter = this.test!.steps.length;
+    if (this.test?.variables) {
+      this.variables = { ...this.test.variables };
+    }
     return this.test!;
   }
 

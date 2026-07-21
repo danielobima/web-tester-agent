@@ -4,6 +4,7 @@ import { ActionSchema, Action, Assertion } from "./actions";
 import { TestSerializer, TestStep } from "./recorder";
 import * as path from "path";
 import { getProviderOptions, generateObjectWithTimeout } from "./utils";
+import * as data from "./data";
 
 export async function evaluateAssertions(
   assertions: Assertion[],
@@ -226,9 +227,25 @@ export async function replayTest(
   signal?: AbortSignal,
   supportsVision?: boolean,
   autoApprovePlan?: boolean,
+  appId?: string,
 ) {
   const serializer = new TestSerializer();
   const test = await serializer.loadTest(filePath);
+
+  const currentAppId = test.appId || appId || "cli";
+  try {
+    const appVars = await data.listVariables(currentAppId);
+    if (!test.variables) {
+      test.variables = {};
+    }
+    for (const v of appVars) {
+      if (v && v.name) {
+        test.variables[v.name] = v.value;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Replay] Failed to merge active variables for ${currentAppId}:`, err);
+  }
 
   console.log(`[Replay] Starting test: ${test.name} (Goal: ${test.startUrl})`);
 
@@ -261,7 +278,13 @@ export async function replayTest(
     try {
       await browser.waitForStability();
       await browser.getSnapshotForLLM(false, false, fullSnapshot);
-      await browser.execute(step.action);
+
+      let actionToExecute = step.action;
+      if (test.variables) {
+        actionToExecute = substituteVariablesInAction(step.action, step.usedVariables, test.variables);
+      }
+
+      await browser.execute(actionToExecute);
 
       // Post-action verification
       await browser.waitForStability();
@@ -347,4 +370,94 @@ export async function replayTest(
   } else {
     console.log(`[Replay] No healing required. Skipping -healed.json save.`);
   }
+}
+
+function substituteVariablesInAction(
+  action: Action,
+  usedVariables: string[] | undefined,
+  variables: Record<string, string> | undefined,
+): Action {
+  if (!usedVariables || usedVariables.length === 0 || !variables) {
+    return action;
+  }
+
+  const actionCopy = JSON.parse(JSON.stringify(action));
+
+  const cleanStr = (s: string) =>
+    s
+      .trim()
+      .replace(/[^a-zA-Z0-9_]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .toLowerCase();
+
+  if (actionCopy.kind === "type") {
+    for (const varName of usedVariables) {
+      if (variables[varName] !== undefined) {
+        const matchByName =
+          actionCopy.name && cleanStr(actionCopy.name) === cleanStr(varName);
+        const matchByRef =
+          actionCopy.ref && cleanStr(actionCopy.ref) === cleanStr(varName);
+        if (matchByName || matchByRef || usedVariables.length === 1) {
+          actionCopy.text = variables[varName];
+          actionCopy.value = variables[varName];
+          console.log(
+            `[Replay] Substituting variable '${varName}' value: '${variables[varName]}' into type action`,
+          );
+          break;
+        }
+      }
+    }
+  } else if (actionCopy.kind === "select_option") {
+    for (const varName of usedVariables) {
+      if (variables[varName] !== undefined) {
+        const matchByName =
+          actionCopy.name && cleanStr(actionCopy.name) === cleanStr(varName);
+        const matchByRef =
+          actionCopy.ref && cleanStr(actionCopy.ref) === cleanStr(varName);
+        if (matchByName || matchByRef || usedVariables.length === 1) {
+          actionCopy.value = variables[varName];
+          console.log(
+            `[Replay] Substituting variable '${varName}' value: '${variables[varName]}' into select_option action`,
+          );
+          break;
+        }
+      }
+    }
+  } else if (actionCopy.kind === "select") {
+    for (const varName of usedVariables) {
+      if (variables[varName] !== undefined) {
+        const matchByName =
+          actionCopy.name && cleanStr(actionCopy.name) === cleanStr(varName);
+        const matchByRef =
+          actionCopy.ref && cleanStr(actionCopy.ref) === cleanStr(varName);
+        if (matchByName || matchByRef || usedVariables.length === 1) {
+          actionCopy.values = [variables[varName]];
+          console.log(
+            `[Replay] Substituting variable '${varName}' value: '${variables[varName]}' into select action`,
+          );
+          break;
+        }
+      }
+    }
+  } else if (actionCopy.kind === "fill" && Array.isArray(actionCopy.fields)) {
+    for (const field of actionCopy.fields) {
+      for (const varName of usedVariables) {
+        if (variables[varName] !== undefined) {
+          const matchByName =
+            field.name && cleanStr(field.name) === cleanStr(varName);
+          const matchByRef =
+            field.ref && cleanStr(field.ref) === cleanStr(varName);
+          if (matchByName || matchByRef) {
+            field.value = variables[varName];
+            console.log(
+              `[Replay] Substituting variable '${varName}' value: '${variables[varName]}' into fill field '${field.name || field.ref}'`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return actionCopy;
 }

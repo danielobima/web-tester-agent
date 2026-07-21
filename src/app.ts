@@ -168,6 +168,10 @@ app.whenReady().then(async () => {
         }
       }
 
+      if (appId && serializer.getTest()) {
+        serializer.getTest()!.appId = appId;
+      }
+
       activeTestController = new AbortController();
       try {
         await browser.init(config.headless || false);

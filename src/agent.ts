@@ -83,6 +83,9 @@ export async function runAgent(
   appId?: string,
 ) {
   let activeVariables = appId ? await data.listVariables(appId) : [];
+  if (serializer) {
+    serializer.setVariables(activeVariables);
+  }
   const history: AgentHistoryMessage[] = [];
   let stepCounter = 1;
   let needsPlanApproval = !autoApprovePlan;
@@ -637,6 +640,9 @@ export async function runAgent(
           if (taskType === "form_filling") {
             try {
               activeVariables = await interceptVariables(action, browser, appId, activeVariables, executionResponse.intendedActionDescription);
+              if (serializer) {
+                serializer.setVariables(activeVariables);
+              }
             } catch (interceptError) {
               console.warn("[Agent] Failed to intercept variables:", interceptError);
             }
@@ -682,6 +688,7 @@ export async function runAgent(
               taskId: currentTaskId,
               stateSnapshot: screenshotPath,
               issues: executionResponse.issues,
+              usedVariables: executionResponse.usedVariables,
             });
             if (onIssuesUpdate)
               onIssuesUpdate(serializer.getTest()?.issues || []);

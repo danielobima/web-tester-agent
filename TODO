@@ -44,6 +44,7 @@
 ☐ Variables -> see Variables.TODO
 ☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
 ☐ LLM timeout should have retry enabled
+☐ Execution replay is missing screenshots
 ☐ Purge alert() and confirm() usage
 ☐ A way to setup base URL and environment(prod, staging, local etc)
 ☐ Task classification: see task-classification.TODO

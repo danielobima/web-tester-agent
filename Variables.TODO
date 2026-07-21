@@ -1,10 +1,11 @@
 ✔ should be able to declare type and value, expiry, purpose (text description of how and where  to use) @done(26-06-30 17:11)
-☐ The agent should have access to create variable based on arbitrary values, website content, network logs, console logs
+✔ The agent should have access to create variable based on arbitrary values, website content, network logs, console logs @done(26-07-21 15:58)
 ✔ variables to be saved as part of application @done(26-06-30 17:11)
-☐ Variables pointers to be saved in serialized script
-☐ Variables to be resolved during execution of serialized script
-☐ list of variables to be provided upon initial planning
-☐ UI for declaring and managing variables
+✔ Variables pointers to be saved in serialized script @done(26-07-21 15:58)
+✔ Variables to be resolved during execution of serialized script @done(26-07-21 15:58)
+✔ list of variables to be provided upon initial planning @done(26-07-21 15:58)
+✔ UI for declaring and managing variables @done(26-07-21 15:58)
+☐ Variable scoping
 ☐ Expiry should be a date and variables to expire after given date. UI to provide intuitive date selection or tags like in 5 mins, 2hrs days etc
 ☐ Variable storage & acquisition scripts
 ☐ Approve variable creation during execution

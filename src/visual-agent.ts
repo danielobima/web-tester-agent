@@ -68,6 +68,9 @@ export async function runVisualAgent(
   appId?: string,
 ) {
   let activeVariables = appId ? await data.listVariables(appId) : [];
+  if (serializer) {
+    serializer.setVariables(activeVariables);
+  }
   const history: AgentHistoryMessage[] = [];
   let stepCounter = 1;
   let needsPlanApproval = !autoApprovePlan;
@@ -831,6 +834,9 @@ export async function runVisualAgent(
           if (taskType === "form_filling") {
             try {
               activeVariables = await interceptVariables(action, browser, appId, activeVariables, executionResponse.intendedActionDescription);
+              if (serializer) {
+                serializer.setVariables(activeVariables);
+              }
             } catch (interceptError) {
               console.warn("[VisualAgent] Failed to intercept variables:", interceptError);
             }
@@ -865,6 +871,7 @@ export async function runVisualAgent(
               taskId: currentTaskId,
               stateSnapshot: screenshotPath,
               issues: executionResponse.issues,
+              usedVariables: executionResponse.usedVariables,
             });
             if (onIssuesUpdate)
               onIssuesUpdate(serializer.getTest()?.issues || []);
