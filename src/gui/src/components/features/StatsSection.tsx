@@ -20,10 +20,6 @@ const getTypeBadge = (type?: string) => {
   let label = type;
 
   switch (type) {
-    case "authentication":
-      styles = "bg-purple-500/10 text-purple-400 border-purple-500/20";
-      label = "auth";
-      break;
     case "form_filling":
       styles = "bg-blue-500/10 text-blue-400 border-blue-500/20";
       label = "form";

@@ -19,6 +19,7 @@ export interface TestStep {
   snapshotBefore?: string;
   searchResults?: string;
   snapshotAfter?: string;
+  usedVariables?: string[];
 }
 
 interface CollapsibleCodeViewerProps {
@@ -276,6 +277,21 @@ export const ExecutionStream = ({
                         <p className="text-sm font-medium text-on-surface/60 leading-relaxed">
                           {result.description}
                         </p>
+
+                        {result.usedVariables && result.usedVariables.length > 0 && (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-primary/70">
+                              <Icons.CheckCircle className="w-3.5 h-3.5" /> Used Variables
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {result.usedVariables.map((v, idx) => (
+                                <span key={idx} className="px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                                  {v}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         {result.screenshot && (
                           <div className="space-y-2">

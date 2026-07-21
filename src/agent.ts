@@ -24,6 +24,7 @@ import {
   estimateImageTokens,
   getTokenBreakdown,
   runWithSchemaRecovery,
+  interceptVariables,
 } from "./agent/utils";
 
 import { planTask } from "./agent/planner";
@@ -491,7 +492,7 @@ export async function runAgent(
           "[Agent][Executor] Failed to generate a valid execution response.",
         );
 
-      const action = executionResponse.action;
+      const action: any = executionResponse.action;
       mapRefsToIdentifiers(action, refs);
 
       const actionStr = JSON.stringify(action);
@@ -633,6 +634,13 @@ export async function runAgent(
         executionResponse.isTaskComplete = true;
       } else {
         try {
+          if (taskType === "form_filling") {
+            try {
+              activeVariables = await interceptVariables(action, browser, appId, activeVariables, executionResponse.intendedActionDescription);
+            } catch (interceptError) {
+              console.warn("[Agent] Failed to intercept variables:", interceptError);
+            }
+          }
           await browser.execute(action);
 
           if (serializer && executionResponse.previousActionResult) {
@@ -653,6 +661,7 @@ export async function runAgent(
               action,
               issues: executionResponse.issues,
               url: browser.page?.url() || "",
+              usedVariables: executionResponse.usedVariables,
             });
           }
 

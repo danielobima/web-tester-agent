@@ -8,6 +8,7 @@ import { ZodError, z } from "zod";
 import { fromError } from "zod-validation-error";
 import { type LanguageModel } from "ai";
 import { getProviderOptions, generateObjectWithTimeout } from "../utils";
+import * as data from "../data";
 
 export function mapRefsToIdentifiers(obj: any, refs: Record<string, any>) {
   if (!obj) return;
@@ -429,6 +430,120 @@ export async function runWithSchemaRecovery<T>(params: {
   }
 
   throw new Error(`[Agent][${params.label ?? "Helper"}] Failed to execute task after ${maxRetries} attempts.`);
+}
+
+export async function interceptVariables(
+  action: any,
+  browser: BrowserManager,
+  appId: string | undefined,
+  activeVariables: data.Variable[],
+  intendedActionDescription?: string,
+): Promise<data.Variable[]> {
+  const intercepted: { name: string; value: string; isSecret: boolean }[] = [];
+
+  const processField = async (field: any, kind: string) => {
+    let val = "";
+    if (kind === "type") {
+      val = field.text !== undefined ? String(field.text) : (field.value !== undefined ? String(field.value) : "");
+    } else if (kind === "select_option") {
+      val = field.value !== undefined ? String(field.value) : "";
+    } else if (kind === "select") {
+      val = Array.isArray(field.values) ? field.values.join(", ") : (field.value !== undefined ? String(field.value) : "");
+    } else {
+      val = field.value !== undefined ? String(field.value) : "";
+    }
+
+    if (val === undefined || val === null || val === "") {
+      return;
+    }
+
+    let name = field.name || "";
+    let isSecret = false;
+
+    if (browser.page) {
+      try {
+        const locator = await browser.getLocator(field);
+        if (locator) {
+          if (!name) {
+            name = await locator.getAttribute("name").catch(() => "") ||
+                   await locator.getAttribute("placeholder").catch(() => "") ||
+                   await locator.getAttribute("id").catch(() => "") || "";
+          }
+          const typeAttr = await locator.getAttribute("type").catch(() => "");
+          if (typeAttr === "password") {
+            isSecret = true;
+          }
+        }
+      } catch (err) {
+        // Ignore locator or page errors
+      }
+    }
+
+    if (!name) {
+      if (field.ref) {
+        name = `${kind}_${field.ref}`;
+      } else {
+        name = `${kind}_field`;
+      }
+    }
+
+    // Clean name to be a valid identifier
+    name = name.trim().replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+    if (!name) {
+      name = `${kind}_field_${Date.now()}`;
+    }
+
+    const lowerName = name.toLowerCase();
+    if (
+      lowerName.includes("password") ||
+      lowerName.includes("secret") ||
+      lowerName.includes("token") ||
+      lowerName.includes("credential")
+    ) {
+      isSecret = true;
+    }
+
+    intercepted.push({ name, value: val, isSecret });
+  };
+
+  if (action.kind === "type" || action.kind === "select_option" || action.kind === "select") {
+    await processField(action, action.kind);
+  } else if (action.kind === "fill" && Array.isArray(action.fields)) {
+    for (const field of action.fields) {
+      await processField(field, "fill");
+    }
+  }
+
+  if (intercepted.length === 0) {
+    return activeVariables;
+  }
+
+  const allVars = await data.listVariables();
+  const currentAppId = appId || "cli";
+
+  for (const item of intercepted) {
+    const existingIndex = allVars.findIndex(
+      (v) => v.appId === currentAppId && v.name === item.name
+    );
+    const updatedVar: data.Variable = {
+      id: existingIndex !== -1 ? allVars[existingIndex].id : `var-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      appId: currentAppId,
+      name: item.name,
+      type: item.isSecret ? "secret" : "string",
+      value: item.value,
+      purpose: intendedActionDescription || "Intercepted from agent action during task execution.",
+      createdAt: Date.now(),
+    };
+
+    if (existingIndex !== -1) {
+      allVars[existingIndex] = updatedVar;
+    } else {
+      allVars.push(updatedVar);
+    }
+  }
+
+  await data.saveVariables(allVars);
+  return allVars.filter((v) => v.appId === currentAppId);
 }
 
 

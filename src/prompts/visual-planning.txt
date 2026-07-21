@@ -21,8 +21,7 @@ When generating or updating the checklist:
     * You MUST **verify completion** and actively plan and execute all necessary subsequent steps until the entire objective is fully realized.
 13. Bypassing Restrictions: When verifying negative requirements (e.g., a blocked feature or disallowed action), create tasks to try all possible methods to circumvent the restriction.
 14. **Task Classification**: You MUST classify each task by setting the `type` field in the task schema to one of the following values:
-    * `authentication`: Login, logout, signup, OTP, MFA, terms acceptance, or cookie consent.
-    * `form_filling`: Typing into input fields, checking checkboxes, selecting dropdown options/comboboxes/radio options, and form submission.
+    * `form_filling`: Typing into input fields, checking checkboxes, selecting dropdown options/comboboxes/radio options, form submission, login, logout, signup, OTP, MFA, terms acceptance, or cookie consent.
     * `navigation`: Page navigation, clicking links, menus, tabs, going back/forward, traversing URLs.
     * `observer`: Waiting for elements/text to load, validating success messages, checking visual/structural states without entering form data.
     * `data_manipulation`: Editing, deleting, list/table items management, dragging/dropping, reordering elements.

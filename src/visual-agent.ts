@@ -30,6 +30,7 @@ import {
   runWithSchemaRecovery,
   extractSchemaErrors,
   reformatJsonWithAgent,
+  interceptVariables,
 } from "./agent/utils";
 
 import { planTask } from "./agent/planner";
@@ -656,7 +657,7 @@ export async function runVisualAgent(
           "[VisualAgent][Executor] Failed to generate a valid execution response.",
         );
 
-      const action = executionResponse.action;
+      const action: any = executionResponse.action;
       mapRefsToIdentifiers(action, refs);
 
       const actionStr = JSON.stringify(action);
@@ -827,6 +828,13 @@ export async function runVisualAgent(
         executionResponse.isTaskComplete = true;
       } else {
         try {
+          if (taskType === "form_filling") {
+            try {
+              activeVariables = await interceptVariables(action, browser, appId, activeVariables, executionResponse.intendedActionDescription);
+            } catch (interceptError) {
+              console.warn("[VisualAgent] Failed to intercept variables:", interceptError);
+            }
+          }
           await browser.execute(action);
 
           // Get snapshot after action has completed
@@ -1037,6 +1045,7 @@ export async function runVisualAgent(
           snapshotBefore: snapshot,
           searchResults: searchResultsText,
           snapshotAfter: afterSnapshotText,
+          usedVariables: executionResponse.usedVariables,
         });
       }
 

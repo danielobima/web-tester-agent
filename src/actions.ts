@@ -508,20 +508,7 @@ export const ActionSchema = z.discriminatedUnion("kind", [
   SearchSnapshotActionSchema,
 ]);
 
-// Specialized Category Action Schemas
-export const AuthenticationActionSchema = z.discriminatedUnion("kind", [
-  ClickActionSchema,
-  ClickSelectorActionSchema,
-  SelectOptionActionSchema,
-  TypeActionSchema,
-  FillActionSchema,
-  PressActionSchema,
-  WaitActionSchema,
-  ScreenshotActionSchema,
-  StopActionSchema,
-  NoneActionSchema,
-  SearchSnapshotActionSchema,
-]);
+
 
 export const FormFillingActionSchema = z.discriminatedUnion("kind", [
   ClickActionSchema,
@@ -644,7 +631,6 @@ export const TaskSchema = z.object({
     .describe("A concise summary of what needs to be achieved in this task"),
   type: z
     .enum([
-      "authentication",
       "form_filling",
       "navigation",
       "observer",
@@ -720,6 +706,10 @@ export const ExecutionResponseSchema = z.object({
     .describe(
       "List of technical bugs, usability issues or anomalies found during this step.",
     ),
+  usedVariables: z
+    .array(z.string())
+    .optional()
+    .describe("Names of variables used to fill inputs in this step"),
 });
 
 export type ExecutionResponse = z.infer<typeof ExecutionResponseSchema>;
@@ -727,9 +717,6 @@ export type ExecutionResponse = z.infer<typeof ExecutionResponseSchema>;
 export function getExecutionResponseSchema(category?: string) {
   let actionSchema: any = ActionSchema;
   switch (category) {
-    case "authentication":
-      actionSchema = AuthenticationActionSchema;
-      break;
     case "form_filling":
       actionSchema = FormFillingActionSchema;
       break;
@@ -776,6 +763,10 @@ export function getExecutionResponseSchema(category?: string) {
       .describe(
         "List of technical bugs, usability issues or anomalies found during this step.",
       ),
+    usedVariables: z
+      .array(z.string())
+      .optional()
+      .describe("Names of variables used to fill inputs in this step"),
   });
 }
 

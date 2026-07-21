@@ -50,4 +50,5 @@ export interface AgentStepUpdate {
   snapshotBefore?: string;
   searchResults?: string;
   snapshotAfter?: string;
+  usedVariables?: string[];
 }
