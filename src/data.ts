@@ -148,10 +148,26 @@ export async function listVariables(appId?: string): Promise<Variable[]> {
   try {
     const content = await fs.readFile(variablesFile, "utf-8");
     const variables: Variable[] = JSON.parse(content);
-    if (appId) {
-      return variables.filter(v => v.appId === appId);
+    
+    const now = Date.now();
+    const activeVariables = variables.filter(v => {
+      if (v.expiry) {
+        const expiryTime = new Date(v.expiry).getTime();
+        if (!isNaN(expiryTime) && expiryTime <= now) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (activeVariables.length < variables.length) {
+      await saveVariables(activeVariables);
     }
-    return variables;
+
+    if (appId) {
+      return activeVariables.filter(v => v.appId === appId);
+    }
+    return activeVariables;
   } catch (error) {
     return [];
   }

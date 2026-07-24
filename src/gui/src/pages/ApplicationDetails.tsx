@@ -32,6 +32,30 @@ export interface Variable {
   createdAt: number;
 }
 
+const formatDatetimeLocal = (date: Date): string => {
+  const pad = (num: number) => String(num).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const formatExpiry = (expiryStr?: string) => {
+  if (!expiryStr) return "";
+  const expiryTime = new Date(expiryStr).getTime();
+  if (isNaN(expiryTime)) return expiryStr;
+  
+  if (expiryTime <= Date.now()) {
+    return "Expired";
+  }
+  
+  const date = new Date(expiryStr);
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
 export const ApplicationDetails = () => {
   const { appId } = useParams<{ appId: string }>();
   const navigate = useNavigate();
@@ -142,7 +166,7 @@ export const ApplicationDetails = () => {
           type: varType,
           value: varValue,
           purpose: varPurpose,
-          expiry: varExpiry,
+          expiry: varExpiry ? new Date(varExpiry).toISOString() : "",
           testId: varScope === "test" ? varTestId : null,
         });
         setVariables(variables.map(v => v.id === editingVariable.id ? updated : v));
@@ -155,7 +179,7 @@ export const ApplicationDetails = () => {
           type: varType,
           value: varValue,
           purpose: varPurpose,
-          expiry: varExpiry,
+          expiry: varExpiry ? new Date(varExpiry).toISOString() : undefined,
         });
         setVariables([...variables, newVar]);
       }
@@ -172,7 +196,7 @@ export const ApplicationDetails = () => {
     setVarType(variable.type);
     setVarValue(variable.value);
     setVarPurpose(variable.purpose);
-    setVarExpiry(variable.expiry || "");
+    setVarExpiry(variable.expiry ? formatDatetimeLocal(new Date(variable.expiry)) : "");
     setVarScope(variable.testId ? "test" : "application");
     setVarTestId(variable.testId || "");
     setIsCreatingVariable(true);
@@ -374,7 +398,7 @@ export const ApplicationDetails = () => {
                       
                       {v.expiry && (
                         <p className="text-xs text-on-surface/50 italic mt-2">
-                          <strong>Expiry:</strong> {v.expiry}
+                          <strong>Expiry:</strong> {formatExpiry(v.expiry)}
                         </p>
                       )}
                     </div>
@@ -573,13 +597,68 @@ export const ApplicationDetails = () => {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Expiry Rule (Optional)</label>
+                <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Expiry Date & Time (Optional)</label>
                 <input 
+                  type="datetime-local"
                   value={varExpiry}
                   onChange={e => setVarExpiry(e.target.value)}
-                  placeholder="e.g. Expires after 5 minutes"
                   className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium"
                 />
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      const d = new Date();
+                      d.setMinutes(d.getMinutes() + 5);
+                      setVarExpiry(formatDatetimeLocal(d));
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-on-surface/5 hover:bg-on-surface/10 text-on-surface/60 rounded-md border border-on-surface/10 transition-colors"
+                  >
+                    +5 mins
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      const d = new Date();
+                      d.setHours(d.getHours() + 2);
+                      setVarExpiry(formatDatetimeLocal(d));
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-on-surface/5 hover:bg-on-surface/10 text-on-surface/60 rounded-md border border-on-surface/10 transition-colors"
+                  >
+                    +2 hrs
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() + 1);
+                      setVarExpiry(formatDatetimeLocal(d));
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-on-surface/5 hover:bg-on-surface/10 text-on-surface/60 rounded-md border border-on-surface/10 transition-colors"
+                  >
+                    +1 day
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() + 7);
+                      setVarExpiry(formatDatetimeLocal(d));
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-on-surface/5 hover:bg-on-surface/10 text-on-surface/60 rounded-md border border-on-surface/10 transition-colors"
+                  >
+                    +7 days
+                  </button>
+                  {varExpiry && (
+                    <button 
+                      type="button" 
+                      onClick={() => setVarExpiry("")}
+                      className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-red-500/10 hover:bg-red-500/20 text-red-600 rounded-md border border-red-500/10 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="flex gap-4 pt-4">
