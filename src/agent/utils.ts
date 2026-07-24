@@ -438,6 +438,7 @@ export async function interceptVariables(
   appId: string | undefined,
   activeVariables: data.Variable[],
   intendedActionDescription?: string,
+  testId?: string,
 ): Promise<data.Variable[]> {
   const intercepted: { name: string; value: string; isSecret: boolean }[] = [];
 
@@ -523,11 +524,12 @@ export async function interceptVariables(
 
   for (const item of intercepted) {
     const existingIndex = allVars.findIndex(
-      (v) => v.appId === currentAppId && v.name === item.name
+      (v) => v.appId === currentAppId && v.name === item.name && v.testId === testId
     );
     const updatedVar: data.Variable = {
       id: existingIndex !== -1 ? allVars[existingIndex].id : `var-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       appId: currentAppId,
+      testId: testId || undefined,
       name: item.name,
       type: item.isSecret ? "secret" : "string",
       value: item.value,
@@ -543,7 +545,9 @@ export async function interceptVariables(
   }
 
   await data.saveVariables(allVars);
-  return allVars.filter((v) => v.appId === currentAppId);
+  const appVars = allVars.filter((v) => v.appId === currentAppId && !v.testId);
+  const testVars = testId ? allVars.filter((v) => v.appId === currentAppId && v.testId === testId) : [];
+  return data.resolveVariables(appVars, testVars);
 }
 
 

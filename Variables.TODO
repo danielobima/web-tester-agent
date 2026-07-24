@@ -5,7 +5,7 @@
 ✔ Variables to be resolved during execution of serialized script @done(26-07-21 15:58)
 ✔ list of variables to be provided upon initial planning @done(26-07-21 15:58)
 ✔ UI for declaring and managing variables @done(26-07-21 15:58)
-☐ Variable scoping
+✔ Variable scoping @done(26-07-24 15:10)
 ☐ Expiry should be a date and variables to expire after given date. UI to provide intuitive date selection or tags like in 5 mins, 2hrs days etc
 ☐ Variable storage & acquisition scripts
 ☐ Approve variable creation during execution

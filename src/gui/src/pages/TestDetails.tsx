@@ -15,17 +15,38 @@ interface Test {
   lastRunPath?: string;
 }
 
+interface Variable {
+  id: string;
+  appId: string;
+  testId?: string;
+  name: string;
+  type: "string" | "number" | "boolean" | "secret" | "json";
+  value: string;
+  expiry?: string;
+  purpose: string;
+  createdAt: number;
+}
+
 export const TestDetails = () => {
   const { testId } = useParams<{ testId: string }>();
   const navigate = useNavigate();
   const [test, setTest] = useState<Test | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
-  const [viewMode, setViewMode] = useState<"settings" | "report" | "script">(
+  const [viewMode, setViewMode] = useState<"settings" | "report" | "script" | "variables">(
     "settings",
   );
   const [reportContent, setReportContent] = useState<string>("");
   const [scriptContent, setScriptContent] = useState<string>("");
+
+  const [allVars, setAllVars] = useState<Variable[]>([]);
+  const [isCreatingVariable, setIsCreatingVariable] = useState(false);
+  const [editingVariable, setEditingVariable] = useState<Variable | null>(null);
+  const [varName, setVarName] = useState("");
+  const [varType, setVarType] = useState<Variable["type"]>("string");
+  const [varValue, setVarValue] = useState("");
+  const [varPurpose, setVarPurpose] = useState("");
+  const [varExpiry, setVarExpiry] = useState("");
 
   const [models, setModels] = useState<any[]>([]);
   const [editName, setEditName] = useState("");
@@ -61,6 +82,10 @@ export const TestDetails = () => {
       } else {
         setEditModel("");
       }
+
+      // Load variables
+      const varsData = await window.electron.listVariables(testData.appId);
+      setAllVars(varsData);
     } catch (error) {
       console.error("Error loading test details:", error);
     } finally {
@@ -119,6 +144,81 @@ export const TestDetails = () => {
     }
   };
 
+  const resetVarForm = () => {
+    setVarName("");
+    setVarType("string");
+    setVarValue("");
+    setVarPurpose("");
+    setVarExpiry("");
+    setEditingVariable(null);
+  };
+
+  const handleSaveVariable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!varName.trim() || !varValue.trim() || !varPurpose.trim() || !test) return;
+
+    try {
+      if (editingVariable) {
+        const updated = await window.electron.updateVariable(editingVariable.id, {
+          name: varName,
+          type: varType,
+          value: varValue,
+          purpose: varPurpose,
+          expiry: varExpiry,
+          testId: test.id,
+        });
+        setAllVars(allVars.map(v => v.id === editingVariable.id ? updated : v));
+        setEditingVariable(null);
+      } else {
+        const newVar = await window.electron.createVariable({
+          appId: test.appId,
+          testId: test.id,
+          name: varName,
+          type: varType,
+          value: varValue,
+          purpose: varPurpose,
+          expiry: varExpiry,
+        });
+        setAllVars([...allVars, newVar]);
+      }
+      setIsCreatingVariable(false);
+      resetVarForm();
+    } catch (error) {
+      console.error("Failed to save variable:", error);
+    }
+  };
+
+  const handleEditVariable = (variable: Variable) => {
+    setEditingVariable(variable);
+    setVarName(variable.name);
+    setVarType(variable.type);
+    setVarValue(variable.value);
+    setVarPurpose(variable.purpose);
+    setVarExpiry(variable.expiry || "");
+    setIsCreatingVariable(true);
+  };
+
+  const handleOverrideVariable = (variable: Variable) => {
+    setEditingVariable(null);
+    setVarName(variable.name);
+    setVarType(variable.type);
+    setVarValue(variable.value);
+    setVarPurpose(variable.purpose || "");
+    setVarExpiry(variable.expiry || "");
+    setIsCreatingVariable(true);
+  };
+
+  const handleDeleteVariable = async (varId: string) => {
+    if (confirm("Are you sure you want to delete this variable?")) {
+      try {
+        await window.electron.deleteVariable(varId);
+        setAllVars(allVars.filter(v => v.id !== varId));
+      } catch (error) {
+        console.error("Failed to delete variable:", error);
+      }
+    }
+  };
+
   const handleRun = () => {
     if (!test) return;
     window.electron.startTest(test.url, test.requirement, test.id, test.model);
@@ -137,6 +237,23 @@ export const TestDetails = () => {
       navigate(`/applications/${test?.appId}`);
     }
   };
+
+  const testVars = test ? allVars.filter(v => v.testId === test.id) : [];
+  const appVars = test ? allVars.filter(v => v.appId === test.appId && !v.testId) : [];
+  const testVarNames = new Set(testVars.map(v => v.name));
+
+  const scopedVars = [
+    ...testVars.map(v => ({ ...v, scope: "test" as const, active: true, overridden: false })),
+    ...appVars.map(v => {
+      const isOverridden = testVarNames.has(v.name);
+      return {
+        ...v,
+        scope: "application" as const,
+        active: !isOverridden,
+        overridden: isOverridden
+      };
+    })
+  ].sort((a, b) => a.name.localeCompare(b.name));
 
   if (isLoading)
     return (
@@ -204,6 +321,11 @@ export const TestDetails = () => {
         <div className="max-w-6xl mx-auto flex gap-8">
           {[
             { id: "settings", label: "Settings", icon: <Icons.Monitor /> },
+            {
+              id: "variables",
+              label: "Variables",
+              icon: <Icons.Dashboard />,
+            },
             {
               id: "report",
               label: "Last Report",
@@ -421,6 +543,243 @@ export const TestDetails = () => {
           {viewMode === "script" && (
             <div className="bg-surface-lowest p-8 rounded-2xl border border-on-surface/10 shadow-inner font-mono text-xs overflow-x-auto whitespace-pre">
               {scriptContent}
+            </div>
+          )}
+
+          {viewMode === "variables" && test && (
+            <div className="space-y-8 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between border-b border-on-surface/5 pb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-on-surface/60">Scoped Variables</h2>
+                  <p className="text-xs text-on-surface/40 mt-1">
+                    Variables available to the Form Filling Agent during execution of this test. Scoped test variables override application variables of the same name.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsCreatingVariable(true)}
+                  className="bg-primary text-white px-5 py-2.5 rounded-lg font-bold text-sm shadow-premium hover:opacity-90 transition-all active:scale-95 flex items-center gap-2"
+                >
+                  <Icons.Plus /> Add Scoped Variable
+                </button>
+              </div>
+
+              {scopedVars.length === 0 ? (
+                <div className="text-center py-20 bg-surface-low border border-dashed border-on-surface/10 rounded-2xl">
+                  <div className="max-w-md mx-auto space-y-4">
+                    <div className="w-12 h-12 rounded-full bg-on-surface/5 flex items-center justify-center mx-auto text-on-surface/30">
+                      <Icons.Dashboard />
+                    </div>
+                    <p className="font-bold text-on-surface/40">No scoped variables in this test</p>
+                    <p className="text-xs text-on-surface/30">
+                      Declare variables scoped specifically to this test, or add application-wide variables under the application details tab to inherit them.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {scopedVars.map(v => (
+                    <div 
+                      key={v.id} 
+                      className={`group p-6 rounded-xl border flex flex-col justify-between shadow-sm transition-all ${
+                        v.overridden 
+                          ? "bg-surface-low/50 border-on-surface/5 opacity-60" 
+                          : "bg-surface-low border-on-surface/5 hover:border-primary/45"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`font-mono font-bold px-2.5 py-1 rounded text-sm ${v.overridden ? "bg-on-surface/5 text-on-surface/30 line-through" : "bg-primary/10 text-primary"}`}>
+                              {v.name}
+                            </span>
+                            <span className="text-[10px] bg-on-surface/5 text-on-surface/60 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">
+                              {v.type}
+                            </span>
+                            {v.scope === "test" ? (
+                              <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded-full font-bold">
+                                Test Scope
+                              </span>
+                            ) : v.overridden ? (
+                              <span className="text-[10px] bg-on-surface/5 text-on-surface/35 px-2 py-0.5 rounded-full font-bold">
+                                App Scope (Overridden)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full font-bold">
+                                App Scope (Inherited)
+                              </span>
+                            )}
+                          </div>
+                          
+                          {v.scope === "test" && (
+                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditVariable(v);
+                                }}
+                                className="p-1 text-on-surface/40 hover:text-primary transition-colors"
+                                title="Edit Variable"
+                              >
+                                <Icons.Edit />
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteVariable(v.id);
+                                }}
+                                className="p-1 text-on-surface/40 hover:text-red-500 transition-colors"
+                                title="Delete Variable"
+                              >
+                                <Icons.Trash />
+                              </button>
+                            </div>
+                          )}
+                          {v.scope === "application" && !v.overridden && (
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOverrideVariable(v);
+                                }}
+                                className="text-xs text-primary font-bold hover:underline flex items-center gap-1"
+                                title="Override this variable for this test"
+                              >
+                                <Icons.Plus className="w-3 h-3" /> Override
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="mb-4">
+                          <p className="text-[10px] font-bold text-on-surface/30 uppercase tracking-widest mb-1">Value</p>
+                          <p className={`font-mono text-sm p-3 rounded-lg border border-on-surface/5 break-all max-h-32 overflow-y-auto ${v.overridden ? "bg-on-surface/5 text-on-surface/20 line-through" : "bg-surface-lowest text-on-surface"}`}>
+                            {v.type === "secret" ? "••••••••••••••••" : v.value}
+                          </p>
+                        </div>
+                        
+                        {v.purpose && (
+                          <p className={`text-xs font-medium mb-1 ${v.overridden ? "text-on-surface/30" : "text-on-surface/60"}`}>
+                            <span className="text-on-surface/30 font-bold uppercase text-[9px] tracking-wider block mb-0.5">Purpose</span>
+                            {v.purpose}
+                          </p>
+                        )}
+                        
+                        {v.expiry && (
+                          <p className={`text-xs italic mt-2 ${v.overridden ? "text-on-surface/20" : "text-on-surface/50"}`}>
+                            <strong>Expiry:</strong> {v.expiry}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {isCreatingVariable && test && (
+            <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200">
+              <div 
+                className="absolute inset-0" 
+                onClick={() => {
+                  setIsCreatingVariable(false);
+                  resetVarForm();
+                }}
+              />
+              <div className="relative w-full max-w-xl bg-surface-low border border-on-surface/10 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="p-8 border-b border-on-surface/5">
+                  <h2 className="text-2xl font-bold font-display tracking-tight border-b border-on-surface/5 pb-2">
+                    {editingVariable ? "Edit Variable" : "Declare Scoped Variable"}
+                  </h2>
+                  <p className="text-on-surface/40 text-sm mt-1">
+                    {editingVariable ? `Updating variable '${editingVariable.name}'` : `Save a variable scoped specifically to the test "${test.name}"`}
+                  </p>
+                </div>
+                
+                <form onSubmit={handleSaveVariable} className="p-8 space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Variable Name</label>
+                      <input 
+                        autoFocus
+                        required
+                        disabled={!!editingVariable}
+                        value={varName}
+                        onChange={e => setVarName(e.target.value.replace(/[^a-zA-Z0-9_]/g, "").toUpperCase())}
+                        placeholder="e.g. CUSTOMER_ID"
+                        className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono font-bold text-sm disabled:opacity-50"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Data Type</label>
+                      <select 
+                        value={varType}
+                        onChange={e => setVarType(e.target.value as any)}
+                        className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium"
+                      >
+                        <option value="string">String (Text)</option>
+                        <option value="number">Number</option>
+                        <option value="boolean">Boolean</option>
+                        <option value="secret">Secret (Obfuscated)</option>
+                        <option value="json">JSON</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Value</label>
+                    <textarea 
+                      required
+                      value={varValue}
+                      onChange={e => setVarValue(e.target.value)}
+                      placeholder={varType === "json" ? '{\n  "key": "value"\n}' : "Enter variable value..."}
+                      rows={3}
+                      className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-mono text-sm resize-none"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Purpose / Description</label>
+                    <input 
+                      required
+                      value={varPurpose}
+                      onChange={e => setVarPurpose(e.target.value)}
+                      placeholder="e.g. Account email used to login"
+                      className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Expiry Rule (Optional)</label>
+                    <input 
+                      value={varExpiry}
+                      onChange={e => setVarExpiry(e.target.value)}
+                      placeholder="e.g. Expires after 5 minutes"
+                      className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium"
+                    />
+                  </div>
+
+                  <div className="flex gap-4 pt-4">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsCreatingVariable(false);
+                        resetVarForm();
+                      }}
+                      className="flex-1 px-6 py-3 rounded-lg font-bold text-sm text-on-surface/60 hover:bg-on-surface/5 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit"
+                      disabled={!varName.trim() || !varValue.trim() || !varPurpose.trim()}
+                      className="flex-1 bg-primary text-white px-6 py-3 rounded-lg font-bold text-sm shadow-premium hover:opacity-90 transition-all disabled:opacity-50"
+                    >
+                      {editingVariable ? "Save Changes" : "Declare Scoped Variable"}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           )}
         </div>

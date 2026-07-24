@@ -43,6 +43,7 @@ export interface AppConfig {
 export interface Variable {
   id: string;
   appId: string;
+  testId?: string;
   name: string;
   type: "string" | "number" | "boolean" | "secret" | "json";
   value: string;
@@ -51,7 +52,18 @@ export interface Variable {
   createdAt: number;
 }
 
-const dataDir = path.join(app.getPath("userData"), "data");
+const getFallbackUserDataPath = () => {
+  const home = process.env.HOME || process.env.USERPROFILE || ".";
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || home, "Electron");
+  } else if (process.platform === "darwin") {
+    return path.join(home, "Library", "Application Support", "Electron");
+  } else {
+    return path.join(home, ".config", "Electron");
+  }
+};
+const userDataPath = app ? app.getPath("userData") : getFallbackUserDataPath();
+const dataDir = path.join(userDataPath, "data");
 const appsFile = path.join(dataDir, "applications.json");
 const testsFile = path.join(dataDir, "tests.json");
 const configFile = path.join(dataDir, "config.json");
@@ -148,4 +160,15 @@ export async function listVariables(appId?: string): Promise<Variable[]> {
 export async function saveVariables(variables: Variable[]): Promise<void> {
   await ensureDataDir();
   await fs.writeFile(variablesFile, JSON.stringify(variables, null, 2), "utf-8");
+}
+
+export function resolveVariables(appVars: Variable[], testVars: Variable[]): Variable[] {
+  const map = new Map<string, Variable>();
+  for (const v of appVars) {
+    map.set(v.name, v);
+  }
+  for (const v of testVars) {
+    map.set(v.name, v);
+  }
+  return Array.from(map.values());
 }

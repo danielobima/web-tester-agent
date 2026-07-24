@@ -168,8 +168,10 @@ app.whenReady().then(async () => {
         }
       }
 
-      if (appId && serializer.getTest()) {
-        serializer.getTest()!.appId = appId;
+      const serializedTest = serializer.getTest();
+      if (serializedTest) {
+        if (appId) serializedTest.appId = appId;
+        if (testId) serializedTest.testId = testId;
       }
 
       activeTestController = new AbortController();
@@ -227,6 +229,7 @@ app.whenReady().then(async () => {
           modelSupportsVision,
           !config.requirePlanApproval,
           appId,
+          testId,
         );
 
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
@@ -329,6 +332,7 @@ app.whenReady().then(async () => {
     const testStartTime = Date.now();
     const targetPath =
       suitePath || path.join(app.getPath("userData"), "last-run.json");
+    const replayArtifactsDir = targetPath.replace(/\.json$/i, ".replay-screenshots");
     activeTestController = new AbortController();
 
     const config = await data.getConfig();
@@ -355,7 +359,7 @@ app.whenReady().then(async () => {
         targetPath,
         browser,
         aiModel,
-        undefined,
+        replayArtifactsDir,
         false,
         false,
         (update) => {
@@ -387,6 +391,13 @@ app.whenReady().then(async () => {
           success: false,
           error: error.message,
           duration: totalDuration,
+        });
+        mainWindow.webContents.send("test-step", {
+          id: "error",
+          step: "Replay Error",
+          status: "failed",
+          duration: "ERR",
+          description: error.message,
         });
       }
     } finally {
@@ -516,11 +527,12 @@ app.whenReady().then(async () => {
     return await data.listVariables(appId);
   });
 
-  ipcMain.handle("create-variable", async (event, { appId, name, type, value, purpose, expiry }) => {
+  ipcMain.handle("create-variable", async (event, { appId, testId, name, type, value, purpose, expiry }) => {
     const variables = await data.listVariables();
     const newVar = {
       id: `var-${Date.now()}`,
       appId,
+      testId,
       name,
       type,
       value,

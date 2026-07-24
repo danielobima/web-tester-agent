@@ -66,8 +66,15 @@ export async function runVisualAgent(
   supportsVision?: boolean,
   autoApprovePlan?: boolean,
   appId?: string,
+  testId?: string,
 ) {
-  let activeVariables = appId ? await data.listVariables(appId) : [];
+  let activeVariables: data.Variable[] = [];
+  if (appId) {
+    const allVars = await data.listVariables(appId);
+    const appVars = allVars.filter(v => !v.testId);
+    const testVars = testId ? allVars.filter(v => v.testId === testId) : [];
+    activeVariables = data.resolveVariables(appVars, testVars);
+  }
   if (serializer) {
     serializer.setVariables(activeVariables);
   }
@@ -833,7 +840,7 @@ export async function runVisualAgent(
         try {
           if (taskType === "form_filling") {
             try {
-              activeVariables = await interceptVariables(action, browser, appId, activeVariables, executionResponse.intendedActionDescription);
+              activeVariables = await interceptVariables(action, browser, appId, activeVariables, executionResponse.intendedActionDescription, testId);
               if (serializer) {
                 serializer.setVariables(activeVariables);
               }

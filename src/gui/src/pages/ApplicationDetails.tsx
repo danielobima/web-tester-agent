@@ -58,6 +58,8 @@ export const ApplicationDetails = () => {
   const [varValue, setVarValue] = useState("");
   const [varPurpose, setVarPurpose] = useState("");
   const [varExpiry, setVarExpiry] = useState("");
+  const [varScope, setVarScope] = useState<"application" | "test">("application");
+  const [varTestId, setVarTestId] = useState("");
 
   const urlSuggestions = Array.from(new Set(tests.map(t => t.url).filter(Boolean)));
 
@@ -97,6 +99,8 @@ export const ApplicationDetails = () => {
     setVarValue("");
     setVarPurpose("");
     setVarExpiry("");
+    setVarScope("application");
+    setVarTestId("");
     setEditingVariable(null);
   };
 
@@ -139,12 +143,14 @@ export const ApplicationDetails = () => {
           value: varValue,
           purpose: varPurpose,
           expiry: varExpiry,
+          testId: varScope === "test" ? varTestId : null,
         });
         setVariables(variables.map(v => v.id === editingVariable.id ? updated : v));
         setEditingVariable(null);
       } else {
         const newVar = await window.electron.createVariable({
           appId: appId!,
+          testId: varScope === "test" ? varTestId : undefined,
           name: varName,
           type: varType,
           value: varValue,
@@ -167,6 +173,8 @@ export const ApplicationDetails = () => {
     setVarValue(variable.value);
     setVarPurpose(variable.purpose);
     setVarExpiry(variable.expiry || "");
+    setVarScope(variable.testId ? "test" : "application");
+    setVarTestId(variable.testId || "");
     setIsCreatingVariable(true);
   };
 
@@ -316,6 +324,15 @@ export const ApplicationDetails = () => {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono font-bold text-primary bg-primary/10 px-2.5 py-1 rounded text-sm">{v.name}</span>
                           <span className="text-[10px] bg-on-surface/5 text-on-surface/60 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">{v.type}</span>
+                          {v.testId ? (
+                            <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded-full font-bold">
+                              Test: {tests.find(t => t.id === v.testId)?.name || "Unknown"}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full font-bold">
+                              App-wide
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
@@ -500,6 +517,36 @@ export const ApplicationDetails = () => {
                     <option value="json">JSON</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Scope</label>
+                  <select 
+                    value={varScope}
+                    onChange={e => setVarScope(e.target.value as any)}
+                    className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium"
+                  >
+                    <option value="application">Application-wide (Global)</option>
+                    <option value="test">Test-specific</option>
+                  </select>
+                </div>
+                {varScope === "test" && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Select Test</label>
+                    <select 
+                      value={varTestId}
+                      required
+                      onChange={e => setVarTestId(e.target.value)}
+                      className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary transition-colors text-on-surface font-medium"
+                    >
+                      <option value="">-- Choose a Test --</option>
+                      {tests.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

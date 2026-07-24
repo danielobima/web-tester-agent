@@ -34,6 +34,7 @@ export interface TestStep {
 export interface SerializedTest {
   id: string;
   appId?: string;
+  testId?: string;
   name: string;
   startUrl: string;
   checklist?: Checklist;

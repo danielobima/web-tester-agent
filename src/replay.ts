@@ -234,11 +234,28 @@ export async function replayTest(
 
   const currentAppId = test.appId || appId || "cli";
   try {
-    const appVars = await data.listVariables(currentAppId);
+    let resolvedTestId = test.testId;
+    if (!resolvedTestId) {
+      try {
+        const tests = await data.listTests(currentAppId);
+        const matchedTest = tests.find(t => t.name === test.name || t.url === test.startUrl);
+        if (matchedTest) {
+          resolvedTestId = matchedTest.id;
+        }
+      } catch (dbErr) {
+        console.warn("[Replay] Failed to resolve testId from database:", dbErr);
+      }
+    }
+
+    const allVars = await data.listVariables(currentAppId);
+    const appVars = allVars.filter(v => !v.testId);
+    const testVars = resolvedTestId ? allVars.filter(v => v.testId === resolvedTestId) : [];
+    const resolvedVars = data.resolveVariables(appVars, testVars);
+
     if (!test.variables) {
       test.variables = {};
     }
-    for (const v of appVars) {
+    for (const v of resolvedVars) {
       if (v && v.name) {
         test.variables[v.name] = v.value;
       }
@@ -255,9 +272,13 @@ export async function replayTest(
   }
 
   if (artifactsDir) {
-    await import("fs/promises").then((fs) =>
-      fs.mkdir(artifactsDir, { recursive: true }),
-    );
+    const fs = await import("fs/promises");
+    try {
+      await fs.rm(artifactsDir, { recursive: true, force: true });
+    } catch (rmErr) {
+      console.warn(`[Replay] Failed to clear artifactsDir ${artifactsDir}:`, rmErr);
+    }
+    await fs.mkdir(artifactsDir, { recursive: true });
     console.log(`[Replay] Saving artifacts to ${artifactsDir}`);
   }
 
@@ -275,20 +296,20 @@ export async function replayTest(
     const stepStartTime = Date.now();
     console.log(`[Replay] Executing Step ${i + 1}: ${step.action.kind}`);
 
+    let actionToExecute = step.action;
+    if (test.variables) {
+      actionToExecute = substituteVariablesInAction(step.action, step.usedVariables, test.variables);
+    }
+
     try {
       await browser.waitForStability();
-      await browser.getSnapshotForLLM(false, false, fullSnapshot);
-
-      let actionToExecute = step.action;
-      if (test.variables) {
-        actionToExecute = substituteVariablesInAction(step.action, step.usedVariables, test.variables);
-      }
+      const { text: beforeSnapshot } = await browser.getSnapshotForLLM(false, false, fullSnapshot);
 
       await browser.execute(actionToExecute);
 
       // Post-action verification
       await browser.waitForStability();
-      const { refs } = await browser.getSnapshotForLLM(true, false, fullSnapshot);
+      const { text: afterSnapshot, refs } = await browser.getSnapshotForLLM(true, false, fullSnapshot);
 
       if (skipAssertions) {
         console.log(
@@ -311,29 +332,41 @@ export async function replayTest(
         }
       }
 
+      let screenshotPath = "";
+      if (artifactsDir && browser.page) {
+        const fullPath = path.join(artifactsDir, `step-${i + 1}-screenshot.png`);
+        await browser.page.screenshot({
+          path: fullPath,
+          fullPage: false,
+        });
+        screenshotPath = `media://${fullPath}`;
+      }
+
       if (onStep) {
         onStep({
-          id: `replay-${i + 1}`,
+          id: step.id || `replay-${i + 1}`,
           step: `Replaying: ${step.action.kind}`,
           status: 'success',
           duration: `${((Date.now() - stepStartTime) / 1000).toFixed(1)}s`,
-          description: step.actionIntent || `Successfully replayed ${step.action.kind} action.`
-        });
-      }
-
-      if (artifactsDir && browser.page) {
-        await browser.page.screenshot({
-          path: path.join(artifactsDir, `step-${i + 1}-screenshot.png`),
-          fullPage: false,
+          description: step.actionIntent || `Successfully replayed ${step.action.kind} action.`,
+          stateDescription: step.stateDescription,
+          screenshot: screenshotPath,
+          action: actionToExecute,
+          issues: step.issues,
+          url: browser.page?.url() || "",
+          usedVariables: step.usedVariables,
+          snapshotBefore: beforeSnapshot,
+          snapshotAfter: afterSnapshot,
         });
       }
     } catch (e: any) {
       console.error(`[Replay] ❌ Step ${i + 1} Failed: ${e.message}`);
 
       // Attempt Healing
-      const newAction = await heal(step, browser, e.message, test.name, model, fullSnapshot, supportsVision, signal);
-
+      let healingSucceeded = false;
+      let newAction: Action | null = null;
       try {
+        newAction = await heal(step, browser, e.message, test.name, model, fullSnapshot, supportsVision, signal);
         console.log(`[Replay] 🛠️ Executing healed action...`);
         await browser.execute(newAction);
 
@@ -347,19 +380,60 @@ export async function replayTest(
         });
         step.action = newAction; // Replace broken action
         wasHealed = true;
-
+        healingSucceeded = true;
         console.log(`[Replay] ✅ Healed successfully. Trace updated.`);
-        if (artifactsDir && browser.page) {
+      } catch (healingError: any) {
+        console.error(`[Replay] ❌ Healing / execution of healed action failed: ${healingError.message}`);
+      }
+
+      let screenshotPath = "";
+      if (artifactsDir && browser.page) {
+        const fullPath = path.join(artifactsDir, `step-${i + 1}-error.png`);
+        try {
           await browser.page.screenshot({
-            path: path.join(artifactsDir, `step-${i + 1}-screenshot.png`),
+            path: fullPath,
             fullPage: false,
           });
+          screenshotPath = `media://${fullPath}`;
+        } catch (ssErr) {
+          console.warn("[Replay] Failed to take error screenshot:", ssErr);
         }
-      } catch (e2: any) {
-        console.error(
-          `[Replay] ❌ Healed action also failed: ${e2.message}. Test aborting.`,
-        );
-        break;
+      }
+
+      if (healingSucceeded && newAction) {
+        if (onStep) {
+          onStep({
+            id: step.id || `replay-${i + 1}`,
+            step: `Replaying: ${step.action.kind} (Healed)`,
+            status: 'success',
+            duration: `${((Date.now() - stepStartTime) / 1000).toFixed(1)}s`,
+            description: `Healed action executed: ${step.actionIntent || ""}`,
+            stateDescription: step.stateDescription,
+            screenshot: screenshotPath,
+            action: newAction,
+            issues: step.issues,
+            url: browser.page?.url() || "",
+            usedVariables: step.usedVariables,
+          });
+        }
+      } else {
+        if (onStep) {
+          onStep({
+            id: step.id || `replay-${i + 1}`,
+            step: `Failed: ${actionToExecute.kind}`,
+            status: 'failed',
+            duration: `${((Date.now() - stepStartTime) / 1000).toFixed(1)}s`,
+            description: `Action failed: ${e.message}`,
+            stateDescription: step.stateDescription,
+            screenshot: screenshotPath,
+            action: actionToExecute,
+            issues: step.issues,
+            url: browser.page?.url() || "",
+            usedVariables: step.usedVariables,
+            error: e.message,
+          });
+        }
+        throw e; // Rethrow the error to abort the test execution
       }
     }
   }
