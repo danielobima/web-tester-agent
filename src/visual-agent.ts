@@ -838,15 +838,24 @@ export async function runVisualAgent(
         executionResponse.isTaskComplete = true;
       } else {
         try {
-          if (taskType === "form_filling") {
-            try {
-              activeVariables = await interceptVariables(action, browser, appId, activeVariables, executionResponse.intendedActionDescription, testId);
-              if (serializer) {
-                serializer.setVariables(activeVariables);
-              }
-            } catch (interceptError) {
-              console.warn("[VisualAgent] Failed to intercept variables:", interceptError);
+          try {
+            activeVariables = await interceptVariables(
+              action,
+              browser,
+              appId,
+              activeVariables,
+              executionResponse.intendedActionDescription,
+              testId,
+              taskType,
+              currentTask.description,
+              executionResponse.createdVariableName,
+              executionResponse.createdVariablePurpose,
+            );
+            if (serializer) {
+              serializer.setVariables(activeVariables);
             }
+          } catch (interceptError) {
+            console.warn("[VisualAgent] Failed to intercept variables:", interceptError);
           }
           await browser.execute(action);
 

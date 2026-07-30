@@ -566,6 +566,21 @@ export const DataManipulationActionSchema = z.discriminatedUnion("kind", [
   SearchSnapshotActionSchema,
 ]);
 
+export const SelectionActionSchema = z.discriminatedUnion("kind", [
+  ClickActionSchema,
+  ClickSelectorActionSchema,
+  SelectOptionActionSchema,
+  SelectActionSchema,
+  HoverActionSchema,
+  ScrollIntoViewActionSchema,
+  PressActionSchema,
+  WaitActionSchema,
+  ScreenshotActionSchema,
+  StopActionSchema,
+  NoneActionSchema,
+  SearchSnapshotActionSchema,
+]);
+
 // Extract the inferred type to use across the project
 export type Action = z.infer<typeof ActionSchema>;
 
@@ -635,6 +650,7 @@ export const TaskSchema = z.object({
       "navigation",
       "observer",
       "data_manipulation",
+      "selection",
       "general",
     ])
     .describe("The specialized agent category for executing this task"),
@@ -710,6 +726,14 @@ export const ExecutionResponseSchema = z.object({
     .array(z.string())
     .optional()
     .describe("Names of variables used to fill inputs in this step"),
+  createdVariableName: z
+    .string()
+    .optional()
+    .describe("Suggested uppercase name for the variable created/intercepted in this step (e.g. 'PRODUCT_NAME')"),
+  createdVariablePurpose: z
+    .string()
+    .optional()
+    .describe("Description of the purpose/meaning of the variable (e.g. 'The product that should be chosen.')"),
 });
 
 export type ExecutionResponse = z.infer<typeof ExecutionResponseSchema>;
@@ -728,6 +752,9 @@ export function getExecutionResponseSchema(category?: string) {
       break;
     case "data_manipulation":
       actionSchema = DataManipulationActionSchema;
+      break;
+    case "selection":
+      actionSchema = SelectionActionSchema;
       break;
   }
 

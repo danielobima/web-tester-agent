@@ -439,8 +439,12 @@ export async function interceptVariables(
   activeVariables: data.Variable[],
   intendedActionDescription?: string,
   testId?: string,
+  taskType?: string,
+  taskDescription?: string,
+  createdVariableName?: string,
+  createdVariablePurpose?: string,
 ): Promise<data.Variable[]> {
-  const intercepted: { name: string; value: string; isSecret: boolean }[] = [];
+  const intercepted: { name: string; value: string; isSecret: boolean; purpose?: string }[] = [];
 
   const processField = async (field: any, kind: string) => {
     let val = "";
@@ -507,7 +511,58 @@ export async function interceptVariables(
     intercepted.push({ name, value: val, isSecret });
   };
 
-  if (action.kind === "type" || action.kind === "select_option" || action.kind === "select") {
+  if (taskType === "selection") {
+    let val = "";
+    if (action.kind === "click" || action.kind === "click_selector") {
+      val = action.name || "";
+      if (!val && browser.page) {
+        try {
+          const loc = action.selector ? browser.page.locator(action.selector) : await browser.getLocator(action);
+          if (loc) {
+            val = await loc.textContent().catch(() => "") || await loc.innerText().catch(() => "");
+            val = val.trim();
+          }
+        } catch (err) {}
+      }
+    } else if (action.kind === "select_option" || action.kind === "select") {
+      val = action.value || (Array.isArray(action.values) ? action.values.join(", ") : "");
+    }
+
+    if (val) {
+      let varName = createdVariableName ? createdVariableName.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_") : "";
+      if (!varName) {
+        let defaultVarName = "SELECTED_ITEM";
+        const descLower = (taskDescription || "").toLowerCase();
+        if (descLower.includes("product")) {
+          defaultVarName = "PRODUCT_NAME";
+        } else if (descLower.includes("flight")) {
+          defaultVarName = "FLIGHT_NAME";
+        } else if (descLower.includes("hotel")) {
+          defaultVarName = "HOTEL_NAME";
+        } else if (descLower.includes("option")) {
+          defaultVarName = "OPTION_NAME";
+        } else if (descLower.includes("size")) {
+          defaultVarName = "SIZE_NAME";
+        } else if (descLower.includes("color")) {
+          defaultVarName = "COLOR_NAME";
+        }
+        varName = defaultVarName;
+      }
+
+      let purpose = createdVariablePurpose || "";
+      if (!purpose) {
+        const noun = varName.replace("_NAME", "").replace("SELECTED_", "").toLowerCase();
+        purpose = `The ${noun} that should be chosen.`;
+      }
+
+      intercepted.push({
+        name: varName,
+        value: val,
+        isSecret: false,
+        purpose,
+      });
+    }
+  } else if (action.kind === "type" || action.kind === "select_option" || action.kind === "select") {
     await processField(action, action.kind);
   } else if (action.kind === "fill" && Array.isArray(action.fields)) {
     for (const field of action.fields) {
@@ -533,7 +588,7 @@ export async function interceptVariables(
       name: item.name,
       type: item.isSecret ? "secret" : "string",
       value: item.value,
-      purpose: intendedActionDescription || "Intercepted from agent action during task execution.",
+      purpose: item.purpose || intendedActionDescription || "Intercepted from agent action during task execution.",
       createdAt: Date.now(),
     };
 
