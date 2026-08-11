@@ -10,6 +10,6 @@
 ☐ Variable storage & acquisition scripts
 ☐ Approve variable creation during execution
 ☐ Autogenerate value to prefill in the variable
-☐ Agent to indicate when a variable was used
+✔ Agent to indicate when a variable was used @done(26-07-30 16:49)
 ☐ Drop down variables?
 
