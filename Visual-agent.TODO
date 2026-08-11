@@ -1,0 +1,7 @@
+✔ SVG workflow, how can we send svg screenshots or renders to the agent for easier analysis @done(26-08-11 11:54)
+✔ Dialog and overlay detection: How can we only avail interactible elements to the agent during planning so that it can plan accordingly @done(26-08-11 12:00)
+✔ Schema separation (VisualAction vs SnapshotAction) & Fallback Snapshot+Screenshot Analyser Agent @done(26-08-11 14:45)
+✔ Bounding boxes of elements that are partially hidden or overlapped are naturally clipped to visible regions @done(26-08-11 16:47)
+✔ Fallback agent memory isolation to prevent polluting visual agent context @done(26-08-11 16:47)
+☐ Scrolling,
+

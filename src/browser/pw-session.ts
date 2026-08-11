@@ -480,9 +480,20 @@ export async function getPageForTargetId(opts: {
   targetId?: string;
 }): Promise<Page> {
   const { browser } = await connectBrowser(opts.cdpUrl);
-  const pages = await getAllPages(browser);
+  let pages = await getAllPages(browser);
   if (!pages.length) {
-    throw new Error("No pages available in the connected browser.");
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      pages = await getAllPages(browser);
+      if (pages.length) break;
+    }
+  }
+
+  if (!pages.length) {
+    const contexts = browser.contexts();
+    const context = contexts[0] || (await browser.newContext());
+    const newPage = await context.newPage();
+    return newPage;
   }
 
   const tid = opts.targetId === "root_target_id" ? undefined : opts.targetId;
@@ -490,17 +501,24 @@ export async function getPageForTargetId(opts: {
     return pages[0];
   }
 
-  const found = await findPageByTargetId(browser, tid, opts.cdpUrl);
+  let found = await findPageByTargetId(browser, tid, opts.cdpUrl);
   if (!found) {
-    // If we can't find the exact targetId, but there is only one page, use it as fallback.
-    // This is helpful when targetIds change or are blocked by relays.
-    if (pages.length === 1) {
-      return pages[0];
+    // Retry finding page by target ID if targets are still attaching over CDP
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 150));
+      found = await findPageByTargetId(browser, tid, opts.cdpUrl);
+      if (found) break;
     }
-    
-    // Last resort: if we have a targetId but couldn't find it, maybe it's the first page
-    // and we just failed to resolve its ID.
-    return pages[0];
+  }
+
+  if (!found) {
+    // If not found by targetId, prefer the page that is NOT about:blank if available
+    const nonBlank = pages.find((p) => p.url() && p.url() !== "about:blank");
+    if (nonBlank) {
+      return nonBlank;
+    }
+    // Fall back to latest or first available page
+    return pages[pages.length - 1] || pages[0];
   }
   return found;
 }
@@ -553,6 +571,12 @@ export async function refLocator(
     : rawRef.startsWith("ref=")
       ? rawRef.slice(4)
       : rawRef;
+
+  if (/^#?\d+$/.test(normalized)) {
+    const num = normalized.replace(/^#/, "");
+    const somLoc = scope.locator(`[data-som-ref="${num}"]`);
+    return somLoc;
+  }
 
   if (/^e\d+$/.test(normalized)) {
     if (state?.roleRefsMode === "aria") {

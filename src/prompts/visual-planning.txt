@@ -27,7 +27,9 @@ When generating or updating the checklist:
     * `data_manipulation`: Editing, deleting, list/table items management, dragging/dropping, reordering elements.
     * `selection`: Choosing an item from a list of items, selecting a product from a gallery/grid, selecting an option from a grid/table, selecting a checkbox/radio in a grid.
     * `general`: Default fallback for tasks that do not fit any of the above categories.
+15. **Dismissed Banners and Modals**: If a modal, popup, newsletter signup, or cookie banner was clicked in the previous step and is no longer visible on the screenshot, mark that task as completed and immediately proceed to the next objective task (e.g., searching for products, navigation, adding to cart). Do NOT plan duplicate tasks to dismiss banners that have already been closed or dismissed.
 
 CRITICAL: If you determine that no further tasks are needed to fulfill the user's intent, you MUST set 'finished' to true. Failing to do so will result in an incomplete test report.
 
 CRITICAL: You MUST output ONLY a valid JSON object matching the requested ChecklistSchema.
+

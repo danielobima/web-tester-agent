@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, protocol, net } from "electron";
 import { pathToFileURL } from "node:url";
 import * as path from "path";
-import { BrowserManager } from "./browser";
+import { BrowserManager, killZombieChromiumSessions } from "./browser";
 import { runAgent } from "./agent";
 import { runVisualAgent } from "./visual-agent";
 import { replayTest } from "./replay";
@@ -324,6 +324,15 @@ app.whenReady().then(async () => {
     if (planApprovalPromise) {
       planApprovalPromise.resolve(result);
       planApprovalPromise = null;
+    }
+  });
+
+  ipcMain.handle("kill-browser-sessions", async () => {
+    try {
+      killZombieChromiumSessions();
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
     }
   });
 

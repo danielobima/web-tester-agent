@@ -1,13 +1,17 @@
 import { z } from "zod";
 
+// Generic reference ID schema that accepts either string ("e12", "#14") or numerical Set-of-Marks ID (14)
+export const RefSchema = z
+  .union([z.string(), z.number()])
+  .transform((val) => String(val));
+
 // Define the schema mirroring OpenClaw's BrowserActRequest
 export const ClickActionSchema = z
   .object({
     kind: z.literal("click"),
-    ref: z
-      .string()
+    ref: RefSchema
       .optional()
-      .describe("The 'ref' ID of the element to click (e.g., 'e12')"),
+      .describe("The 'ref' ID or Set-of-Marks number of the element to click (e.g., 'e12' or 14)"),
     role: z
       .string()
       .optional()
@@ -52,10 +56,9 @@ export const ClickSelectorActionSchema = z
 export const SelectOptionActionSchema = z
   .object({
     kind: z.literal("select_option"),
-    ref: z
-      .string()
+    ref: RefSchema
       .optional()
-      .describe("The 'ref' ID of the element to select from"),
+      .describe("The 'ref' ID or Set-of-Marks number of the element to select from"),
     role: z.string().optional().describe("The ARIA role of the element"),
     name: z.string().optional().describe("The accessible name of the element"),
     nth: z.number().optional().describe("The index if multiple match"),
@@ -78,10 +81,9 @@ export const SelectOptionActionSchema = z
 export const TypeActionSchema = z
   .object({
     kind: z.literal("type"),
-    ref: z
-      .string()
+    ref: RefSchema
       .optional()
-      .describe("The 'ref' ID of the input element to type into"),
+      .describe("The 'ref' ID or Set-of-Marks number of the input element to type into"),
     role: z.string().optional().describe("The ARIA role of the input element"),
     name: z
       .string()
@@ -131,10 +133,9 @@ export const PressActionSchema = z
 export const HoverActionSchema = z
   .object({
     kind: z.literal("hover"),
-    ref: z
-      .string()
+    ref: RefSchema
       .optional()
-      .describe("The 'ref' ID of the element to hover over"),
+      .describe("The 'ref' ID or Set-of-Marks number of the element to hover over"),
     role: z
       .string()
       .optional()
@@ -154,10 +155,9 @@ export const HoverActionSchema = z
 export const ScrollIntoViewActionSchema = z
   .object({
     kind: z.literal("scrollIntoView"),
-    ref: z
-      .string()
+    ref: RefSchema
       .optional()
-      .describe("The 'ref' ID of the element to scroll into the viewport"),
+      .describe("The 'ref' ID or Set-of-Marks number of the element to scroll into the viewport"),
     role: z
       .string()
       .optional()
@@ -179,8 +179,7 @@ export const ScrollIntoViewActionSchema = z
 export const DragActionSchema = z
   .object({
     kind: z.literal("drag"),
-    startRef: z
-      .string()
+    startRef: RefSchema
       .optional()
       .describe("The 'ref' ID of the element to start dragging from"),
     startRole: z
@@ -192,8 +191,7 @@ export const DragActionSchema = z
       .optional()
       .describe("The accessible name of the element to start dragging from"),
     startNth: z.number().optional().describe("The index if multiple match"),
-    endRef: z
-      .string()
+    endRef: RefSchema
       .optional()
       .describe("The 'ref' ID of the element to drop onto"),
     endRole: z
@@ -217,7 +215,7 @@ export const DragActionSchema = z
 export const SelectActionSchema = z
   .object({
     kind: z.literal("select"),
-    ref: z.string().optional().describe("The 'ref' ID of the <select> element"),
+    ref: RefSchema.optional().describe("The 'ref' ID or Set-of-Marks number of the <select> element"),
     role: z
       .string()
       .optional()
@@ -246,10 +244,9 @@ export const FillActionSchema = z
       .union([
         z.array(
           z.object({
-            ref: z
-              .string()
+            ref: RefSchema
               .optional()
-              .describe("The 'ref' ID of the form field"),
+              .describe("The 'ref' ID or Set-of-Marks number of the form field"),
             role: z
               .string()
               .optional()
@@ -509,6 +506,186 @@ export const ActionSchema = z.discriminatedUnion("kind", [
 ]);
 
 
+
+// ==========================================
+// PURE VISUAL-FIRST ACTION SCHEMAS (SoM)
+// ==========================================
+
+export const VisualClickActionSchema = z
+  .object({
+    kind: z.literal("click"),
+    ref: RefSchema.describe(
+      "The Set-of-Marks numerical ref of the element to click (e.g., 14 or '14')",
+    ),
+    doubleClick: z.boolean().optional().describe("Whether to double click"),
+    button: z.enum(["left", "right", "middle"]).optional().describe("Which mouse button to press"),
+    timeoutMs: z.number().optional().describe("Provide maximum time to wait in ms"),
+  })
+  .describe("Click on an element using its visible Set-of-Marks number.");
+
+export const VisualTypeActionSchema = z
+  .object({
+    kind: z.literal("type"),
+    ref: RefSchema.describe(
+      "The Set-of-Marks numerical ref of the input element to type into (e.g., 9 or '9')",
+    ),
+    text: z.string().optional().describe("The exact text to type into the field (e.g., 'shoes')"),
+    value: z.string().optional().describe("The exact text to type into the field (alias for text)"),
+    submit: z.boolean().optional().describe("Whether to press Enter/Submit after typing (e.g. true for search bars)"),
+    slowly: z.boolean().optional().describe("Whether to type slowly"),
+    timeoutMs: z.number().optional().describe("Provide maximum time to wait in ms"),
+  })
+  .describe("Type text into an input field using its Set-of-Marks number.");
+
+export const VisualFillActionSchema = z
+  .object({
+    kind: z.literal("fill"),
+    fields: z.union([
+      z.array(
+        z.object({
+          ref: RefSchema.describe("The Set-of-Marks numerical ref"),
+          value: z.union([z.string(), z.number(), z.boolean()]).describe("The text or value to fill into the input field"),
+          type: z.string().optional().describe("The type of the field, usually 'textbox'"),
+        }),
+      ).min(1),
+      z.array(z.string()).min(2).transform((arr) => {
+        const fields = [];
+        for (let i = 0; i < arr.length; i += 2) {
+          fields.push({
+            ref: arr[i],
+            value: arr[i + 1],
+            type: "textbox",
+          });
+        }
+        return fields;
+      }),
+    ]).describe("The fields and their values to fill out"),
+    timeoutMs: z.number().optional().describe("Provide maximum time to wait in ms"),
+  })
+  .describe("Fill form fields using their Set-of-Marks numbers.");
+
+export const VisualSelectOptionActionSchema = z
+  .object({
+    kind: z.literal("select_option"),
+    ref: RefSchema.describe(
+      "The Set-of-Marks numerical ref of the dropdown/select element",
+    ),
+    value: z.string().describe("The value or label of the option to select"),
+    timeoutMs: z.number().optional().describe("Provide maximum time to wait in ms"),
+  })
+  .describe("Select an option from a dropdown using its Set-of-Marks number.");
+
+export const VisualHoverActionSchema = z
+  .object({
+    kind: z.literal("hover"),
+    ref: RefSchema.describe("The Set-of-Marks numerical ref of the element to hover over"),
+    timeoutMs: z.number().optional().describe("Provide maximum time to wait in ms"),
+  })
+  .describe("Hover over an element using its Set-of-Marks number.");
+
+export const VisualScrollIntoViewActionSchema = z
+  .object({
+    kind: z.literal("scroll_into_view"),
+    ref: RefSchema.describe("The Set-of-Marks numerical ref to scroll into view"),
+    timeoutMs: z.number().optional().describe("Provide maximum time to wait in ms"),
+  })
+  .describe("Scroll an element into view.");
+
+export const VisualActionSchema = z.discriminatedUnion("kind", [
+  VisualClickActionSchema,
+  VisualTypeActionSchema,
+  VisualFillActionSchema,
+  VisualSelectOptionActionSchema,
+  VisualHoverActionSchema,
+  VisualScrollIntoViewActionSchema,
+  ClickSelectorActionSchema,
+  DragActionSchema,
+  PressActionSchema,
+  SelectActionSchema,
+  WaitActionSchema,
+  EvaluateActionSchema,
+  CloseActionSchema,
+  NavigateActionSchema,
+  ScreenshotActionSchema,
+  StopActionSchema,
+  NoneActionSchema,
+  SwitchTabActionSchema,
+  ListTabsActionSchema,
+  CloseTabActionSchema,
+  NewTabActionSchema,
+]);
+
+export const VisualFormFillingActionSchema = z.discriminatedUnion("kind", [
+  VisualClickActionSchema,
+  ClickSelectorActionSchema,
+  VisualSelectOptionActionSchema,
+  VisualTypeActionSchema,
+  VisualFillActionSchema,
+  PressActionSchema,
+  SelectActionSchema,
+  WaitActionSchema,
+  ScreenshotActionSchema,
+  StopActionSchema,
+  NoneActionSchema,
+]);
+
+export const VisualNavigationActionSchema = z.discriminatedUnion("kind", [
+  VisualClickActionSchema,
+  ClickSelectorActionSchema,
+  VisualHoverActionSchema,
+  VisualScrollIntoViewActionSchema,
+  PressActionSchema,
+  WaitActionSchema,
+  ScreenshotActionSchema,
+  StopActionSchema,
+  NoneActionSchema,
+  NavigateActionSchema,
+  SwitchTabActionSchema,
+  ListTabsActionSchema,
+  CloseTabActionSchema,
+  NewTabActionSchema,
+]);
+
+export const VisualObserverActionSchema = z.discriminatedUnion("kind", [
+  WaitActionSchema,
+  ScreenshotActionSchema,
+  StopActionSchema,
+  NoneActionSchema,
+]);
+
+export const VisualDataManipulationActionSchema = z.discriminatedUnion("kind", [
+  VisualClickActionSchema,
+  ClickSelectorActionSchema,
+  VisualHoverActionSchema,
+  VisualScrollIntoViewActionSchema,
+  DragActionSchema,
+  PressActionSchema,
+  WaitActionSchema,
+  ScreenshotActionSchema,
+  StopActionSchema,
+  NoneActionSchema,
+  EvaluateActionSchema,
+]);
+
+export const VisualSelectionActionSchema = z.discriminatedUnion("kind", [
+  VisualClickActionSchema,
+  ClickSelectorActionSchema,
+  VisualSelectOptionActionSchema,
+  SelectActionSchema,
+  VisualHoverActionSchema,
+  VisualScrollIntoViewActionSchema,
+  PressActionSchema,
+  WaitActionSchema,
+  ScreenshotActionSchema,
+  StopActionSchema,
+  NoneActionSchema,
+]);
+
+export type VisualAction = z.infer<typeof VisualActionSchema>;
+
+// ==========================================
+// STANDARD / HYBRID ACTION SCHEMAS
+// ==========================================
 
 export const FormFillingActionSchema = z.discriminatedUnion("kind", [
   ClickActionSchema,
@@ -794,6 +971,113 @@ export function getExecutionResponseSchema(category?: string) {
       .array(z.string())
       .optional()
       .describe("Names of variables used to fill inputs in this step"),
+  });
+}
+
+export const VisualExecutionResponseSchema = z.object({
+  currentStateDescription: z
+    .string()
+    .describe("Detailed visual observation of the current page elements and badges"),
+  intendedActionDescription: z
+    .string()
+    .describe("Plain-text rationale for the selected visual action"),
+  previousActionResult: z
+    .string()
+    .optional()
+    .describe("Outcome of the previous execution step"),
+  action: VisualActionSchema,
+  isTaskComplete: z
+    .boolean()
+    .describe("Whether this specific high-level task is now finished"),
+  taskResult: z
+    .string()
+    .optional()
+    .describe("A summary of what was accomplished during this task, if complete"),
+  issues: z
+    .array(
+      z.object({
+        description: z.string(),
+        severity: IssueSeveritySchema,
+      }),
+    )
+    .default([])
+    .describe("List of technical bugs, usability issues or anomalies found during this step."),
+  usedVariables: z
+    .array(z.string())
+    .optional()
+    .describe("Names of variables used to fill inputs in this step"),
+  createdVariableName: z
+    .string()
+    .optional()
+    .describe("Suggested uppercase name for the variable created in this step"),
+  createdVariablePurpose: z
+    .string()
+    .optional()
+    .describe("Description of the purpose/meaning of the variable"),
+});
+
+export type VisualExecutionResponse = z.infer<typeof VisualExecutionResponseSchema>;
+
+export function getVisualExecutionResponseSchema(category?: string) {
+  let actionSchema: any = VisualActionSchema;
+  switch (category) {
+    case "form_filling":
+      actionSchema = VisualFormFillingActionSchema;
+      break;
+    case "navigation":
+      actionSchema = VisualNavigationActionSchema;
+      break;
+    case "observer":
+      actionSchema = VisualObserverActionSchema;
+      break;
+    case "data_manipulation":
+      actionSchema = VisualDataManipulationActionSchema;
+      break;
+    case "selection":
+      actionSchema = VisualSelectionActionSchema;
+      break;
+  }
+
+  return z.object({
+    currentStateDescription: z
+      .string()
+      .describe("Detailed visual observation of the current page elements and badges"),
+    intendedActionDescription: z
+      .string()
+      .describe("Plain-text rationale for the selected visual action"),
+    previousActionResult: z
+      .string()
+      .optional()
+      .describe("Outcome of the previous execution step"),
+    action: actionSchema,
+    isTaskComplete: z
+      .boolean()
+      .describe("Whether this specific high-level task is now finished"),
+    taskResult: z
+      .string()
+      .optional()
+      .describe("A summary of what was accomplished during this task, if complete"),
+    issues: z
+      .array(
+        z.object({
+          description: z.string(),
+          severity: IssueSeveritySchema,
+        }),
+      )
+      .default([])
+      .describe("List of technical bugs, usability issues or anomalies found during this step."),
+    usedVariables: z
+      .array(z.string())
+      .optional()
+      .describe("Names of variables used to fill inputs in this step"),
+    createdVariableName: z
+      .string()
+      .optional()
+      .describe("Suggested uppercase name for the variable created in this step"),
+    createdVariablePurpose: z
+      .string()
+      .optional()
+      .describe("Description of the purpose/meaning of the variable"),
   });
 }
 

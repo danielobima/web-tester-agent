@@ -20,12 +20,17 @@ export function bumpDownloadArmId(): number {
 }
 
 export function requireRefOrRole(opts: {
-  ref?: string;
+  ref?: string | number;
   role?: string;
   name?: string;
   nth?: number;
 }): { ref?: string; role?: string; name?: string; nth?: number } {
-  const rawRef = typeof opts.ref === "string" ? opts.ref.trim() : "";
+  const rawRef =
+    typeof opts.ref === "number"
+      ? String(opts.ref)
+      : typeof opts.ref === "string"
+        ? opts.ref.trim()
+        : "";
   const roleRef = rawRef ? parseRoleRef(rawRef) : null;
   const ref = roleRef ?? (rawRef.startsWith("@") ? rawRef.slice(1) : rawRef);
 

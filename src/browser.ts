@@ -9,6 +9,8 @@ import * as path from "path";
 import { type Action } from "./actions";
 import { snapshotRoleViaPlaywright } from "./browser/pw-tools-core.snapshot";
 import { getRoleSnapshotStats } from "./browser/pw-role-snapshot";
+import * as net from "net";
+import { execSync } from "child_process";
 import {
   clickViaPlaywright,
   typeViaPlaywright,
@@ -25,11 +27,59 @@ import {
   takeScreenshotViaPlaywright,
 } from "./browser/pw-tools-core";
 import { refLocator, findPageByTargetId } from "./browser/pw-session";
+import { SomManager, SomInjectionResult } from "./som/som_overlay";
+
+/**
+ * Finds an available TCP port to prevent collisions with other running instances.
+ */
+export async function findFreePort(preferredPort: number = 9222): Promise<number> {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => {
+      // Preferred port is in use, find any ephemeral free port
+      const randomSrv = net.createServer();
+      randomSrv.listen(0, "127.0.0.1", () => {
+        const port = (randomSrv.address() as net.AddressInfo).port;
+        randomSrv.close(() => resolve(port));
+      });
+    });
+    srv.listen(preferredPort, "127.0.0.1", () => {
+      const port = (srv.address() as net.AddressInfo).port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * Cleanly terminates lingering/orphaned headless chromium processes holding ports or running detached.
+ */
+export function killZombieChromiumSessions(port?: number): void {
+  try {
+    if (process.platform === "linux" || process.platform === "darwin") {
+      if (port) {
+        try {
+          execSync(`fuser -k ${port}/tcp 2>/dev/null || true`);
+        } catch {}
+      }
+      try {
+        execSync("pkill -f chrome-headless-shell 2>/dev/null || true");
+      } catch {}
+    } else if (process.platform === "win32") {
+      try {
+        execSync("taskkill /F /IM chrome-headless-shell.exe 2>nul || true");
+      } catch {}
+    }
+  } catch (e) {
+    console.warn("[Browser] Failed to clean zombie browsers:", e);
+  }
+}
 
 export class BrowserManager {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   public page: Page | null = null;
+  public somManager: SomManager | null = null;
+  public lastSomMarks: SomInjectionResult | null = null;
   public networkLogs: {
     url: string;
     method: string;
@@ -51,16 +101,22 @@ export class BrowserManager {
   // Track all pages in the context
   public pages: Page[] = [];
 
-  async init(headless: boolean = false) {
+  async init(headless: boolean = false, autoKillZombies: boolean = true) {
     if (this.browser) return; // Already initialized
 
-    // We have to launch the browser with remote debugging port to use CDP
+    if (autoKillZombies) {
+      killZombieChromiumSessions();
+    }
+
+    // Dynamically allocate an available port to prevent collisions
+    const port = await findFreePort(9222);
+
     this.browser = await chromium.launch({
       headless,
-      args: ["--remote-debugging-port=9222"],
+      args: [`--remote-debugging-port=${port}`],
     });
 
-    this.cdpUrl = "http://localhost:9222";
+    this.cdpUrl = `http://localhost:${port}`;
 
     this.context = await this.browser.newContext();
     
@@ -338,6 +394,57 @@ export class BrowserManager {
     return await refLocator(this.page, opts);
   }
 
+  /**
+   * Injects Set-of-Marks (SoM) visual overlays and captures an annotated screenshot.
+   */
+  async captureAnnotatedScreenshot(outputPath?: string): Promise<{ buffer: Buffer; marks: SomInjectionResult }> {
+    if (!this.page) throw new Error("Browser not initialized");
+    if (!this.somManager) {
+      this.somManager = new SomManager(this.page);
+    }
+
+    const marks = await this.somManager.injectOverlay();
+    this.lastSomMarks = marks;
+
+    const buffer = await this.page.screenshot(outputPath ? { path: outputPath } : undefined);
+    return { buffer, marks };
+  }
+
+  /**
+   * Cleans up any active Set-of-Marks visual overlay badges from the DOM.
+   */
+  async cleanupVisualOverlay(): Promise<void> {
+    if (this.somManager) {
+      await this.somManager.cleanupOverlay();
+    }
+  }
+
+  /**
+   * Executes an action on an element by its numerical or string Set-of-Marks reference ID.
+   */
+  async executeVisualMarkAction(action: {
+    action: "click" | "fill" | "hover" | "press" | "select";
+    ref: number | string;
+    value?: string;
+    key?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    if (!this.page) throw new Error("Browser not initialized");
+    if (!this.somManager) {
+      this.somManager = new SomManager(this.page);
+    }
+    const numericRef =
+      typeof action.ref === "number"
+        ? action.ref
+        : parseInt(String(action.ref).replace(/^#/, "").replace(/^e/, ""), 10);
+
+    return await this.somManager.executeAction({
+      action: action.action as any,
+      ref: isNaN(numericRef) ? 0 : numericRef,
+      value: action.value,
+      key: action.key,
+    });
+  }
+
   async execute(action: Action) {
     if (!this.page) throw new Error("Browser not initialized");
 
@@ -347,11 +454,17 @@ export class BrowserManager {
 
     switch (action.kind) {
       case "navigate":
-        await navigateViaPlaywright({
-          ...baseOpts,
-          url: action.url,
-          timeoutMs: action.timeoutMs,
-        });
+        if (this.page && !this.page.isClosed()) {
+          await this.page.goto(action.url, {
+            timeout: Math.max(1000, Math.min(120_000, action.timeoutMs ?? 30_000)),
+          });
+        } else {
+          await navigateViaPlaywright({
+            ...baseOpts,
+            url: action.url,
+            timeoutMs: action.timeoutMs,
+          });
+        }
         break;
 
       case "click_selector":
@@ -364,6 +477,14 @@ export class BrowserManager {
         break;
 
       case "select_option":
+        if (action.ref && /^#?\d+$/.test(String(action.ref))) {
+          await this.executeVisualMarkAction({
+            action: "select",
+            ref: action.ref,
+            value: action.value,
+          });
+          break;
+        }
         if (action.ref || action.role || action.name) {
           await selectOptionViaPlaywright({
             ...baseOpts,
@@ -385,6 +506,13 @@ export class BrowserManager {
         break;
 
       case "click":
+        if (action.ref && /^#?\d+$/.test(String(action.ref))) {
+          await this.executeVisualMarkAction({
+            action: "click",
+            ref: action.ref,
+          });
+          break;
+        }
         await clickViaPlaywright({
           ...baseOpts,
           ref: action.ref,
@@ -398,6 +526,17 @@ export class BrowserManager {
         break;
 
       case "type":
+        if (action.ref && /^#?\d+$/.test(String(action.ref))) {
+          await this.executeVisualMarkAction({
+            action: "fill",
+            ref: action.ref,
+            value: action.text ?? action.value ?? "",
+          });
+          if (action.submit) {
+            await this.page.keyboard.press("Enter");
+          }
+          break;
+        }
         await typeViaPlaywright({
           ...baseOpts,
           ref: action.ref,
@@ -420,6 +559,13 @@ export class BrowserManager {
         break;
 
       case "hover":
+        if (action.ref && /^#?\d+$/.test(String(action.ref))) {
+          await this.executeVisualMarkAction({
+            action: "hover",
+            ref: action.ref,
+          });
+          break;
+        }
         await hoverViaPlaywright({
           ...baseOpts,
           ref: action.ref,
@@ -473,6 +619,27 @@ export class BrowserManager {
         break;
 
       case "fill":
+        if (Array.isArray(action.fields) && action.fields.length > 0) {
+          const hasNumericalRefs = action.fields.some((f: any) => f.ref && /^#?\d+$/.test(String(f.ref)));
+          if (hasNumericalRefs) {
+            for (const field of action.fields as any[]) {
+              if (field.ref && /^#?\d+$/.test(String(field.ref))) {
+                await this.executeVisualMarkAction({
+                  action: "fill",
+                  ref: field.ref,
+                  value: String(field.value ?? ""),
+                });
+              } else if (field.ref || field.role || field.name || field.selector) {
+                await fillFormViaPlaywright({
+                  ...baseOpts,
+                  fields: [field],
+                  timeoutMs: action.timeoutMs,
+                });
+              }
+            }
+            break;
+          }
+        }
         await fillFormViaPlaywright({
           ...baseOpts,
           fields: action.fields,
