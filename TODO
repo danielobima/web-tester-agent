@@ -42,7 +42,8 @@
 ✔ Markdown report generation with findings @done(26-04-14 12:03)
 ✔ Create an application to group tests into suites @done(26-05-12 12:15)
 ☐ Variables -> see Variables.TODO
-☐ How to interact with svg icons
+✔ How to interact with svg icons @done(26-08-12 10:44)
+☐ Test preconditions, eg, run this other test first or this cookie must be available etc
 ☐ Ongoing execution page should be able to be opened and closed, also should function like a queue such that i can queue mutliple tests
 ☐ LLM timeout should have retry enabled
 ☐ Execution replay is missing screenshots
