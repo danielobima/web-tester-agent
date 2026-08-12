@@ -318,6 +318,93 @@ export const SOM_INJECTION_SCRIPT = `
     return ra.left - rb.left;
   });
 
+  // Dynamic collision-free badge positioning algorithm
+  const placedBadges = [];
+
+  function hasBadgeCollision(cand, placed) {
+    const margin = 1;
+    return placed.some(p => !(
+      (cand.x + cand.width + margin) <= p.left ||
+      (cand.x - margin) >= p.right ||
+      (cand.y + cand.height + margin) <= p.top ||
+      (cand.y - margin) >= p.bottom
+    ));
+  }
+
+  function findBestBadgePosition(vRect, ref) {
+    const badgeWidth = String(ref).length * 7 + 10;
+    const badgeHeight = 16;
+    const isEven = ref % 2 === 0;
+
+    const rawCandidates = [];
+
+    // Small elements (carousel dots, icon buttons, arrows <= 36px)
+    if (vRect.width <= 36 && vRect.height <= 36) {
+      if (isEven) {
+        rawCandidates.push({ x: vRect.left + (vRect.width - badgeWidth) / 2, y: vRect.bottom + 2 });
+        rawCandidates.push({ x: vRect.left + (vRect.width - badgeWidth) / 2, y: vRect.top - badgeHeight - 2 });
+      } else {
+        rawCandidates.push({ x: vRect.left + (vRect.width - badgeWidth) / 2, y: vRect.top - badgeHeight - 2 });
+        rawCandidates.push({ x: vRect.left + (vRect.width - badgeWidth) / 2, y: vRect.bottom + 2 });
+      }
+      rawCandidates.push({ x: vRect.left + (vRect.width - badgeWidth) / 2, y: vRect.top + (vRect.height - badgeHeight) / 2 });
+      rawCandidates.push({ x: vRect.left + (vRect.width - badgeWidth) / 2, y: vRect.top - badgeHeight * 2 - 3 });
+      rawCandidates.push({ x: vRect.left + (vRect.width - badgeWidth) / 2, y: vRect.bottom + badgeHeight + 3 });
+    } else {
+      // Normal / larger elements
+      rawCandidates.push({ x: vRect.left, y: vRect.top - badgeHeight });
+      rawCandidates.push({ x: vRect.right - badgeWidth, y: vRect.top - badgeHeight });
+      rawCandidates.push({ x: vRect.left + 2, y: vRect.top + 2 });
+      rawCandidates.push({ x: vRect.right - badgeWidth - 2, y: vRect.top + 2 });
+      rawCandidates.push({ x: vRect.left, y: vRect.bottom + 1 });
+      rawCandidates.push({ x: vRect.right - badgeWidth, y: vRect.bottom + 1 });
+      rawCandidates.push({ x: vRect.left + (vRect.width - badgeWidth) / 2, y: vRect.top + (vRect.height - badgeHeight) / 2 });
+      rawCandidates.push({ x: vRect.left, y: vRect.bottom - badgeHeight - 2 });
+    }
+
+    // Secondary lateral offsets
+    rawCandidates.push({ x: vRect.left - badgeWidth - 2, y: vRect.top });
+    rawCandidates.push({ x: vRect.right + 2, y: vRect.top });
+
+    // Find first collision-free candidate within viewport bounds
+    for (const cand of rawCandidates) {
+      const cx = Math.max(2, Math.min(window.innerWidth - badgeWidth - 2, cand.x));
+      const cy = Math.max(2, Math.min(window.innerHeight - badgeHeight - 2, cand.y));
+
+      const candRect = {
+        x: cx,
+        y: cy,
+        width: badgeWidth,
+        height: badgeHeight,
+        left: cx,
+        top: cy,
+        right: cx + badgeWidth,
+        bottom: cy + badgeHeight
+      };
+
+      if (!hasBadgeCollision(candRect, placedBadges)) {
+        placedBadges.push(candRect);
+        return candRect;
+      }
+    }
+
+    // Fallback if heavily congested
+    const defaultX = Math.max(2, Math.min(window.innerWidth - badgeWidth - 2, vRect.left));
+    const defaultY = Math.max(2, Math.min(window.innerHeight - badgeHeight - 2, vRect.top >= 18 ? vRect.top - badgeHeight : vRect.top));
+    const fallback = {
+      x: defaultX,
+      y: defaultY,
+      width: badgeWidth,
+      height: badgeHeight,
+      left: defaultX,
+      top: defaultY,
+      right: defaultX + badgeWidth,
+      bottom: defaultY + badgeHeight
+    };
+    placedBadges.push(fallback);
+    return fallback;
+  }
+
   const marks = [];
   let currentRef = 1;
 
@@ -355,25 +442,26 @@ export const SOM_INJECTION_SCRIPT = `
       opacity: 1 !important;
     \`;
 
+    // Dynamic collision-free badge placement
+    const badgePos = findBestBadgePosition(vRect, ref);
+    const relBadgeTop = Math.round(badgePos.y - vRect.top);
+    const relBadgeLeft = Math.round(badgePos.x - vRect.left);
+
     // Numbered Badge (#ref)
     const badge = document.createElement('div');
     badge.className = '__som_badge__';
     badge.textContent = \`\${ref}\`;
     
-    // Position badge: prefer top-left above element, or inside top-left if too close to screen/container top
-    const badgeTop = (vRect.top >= 18) ? -16 : 0;
-    const badgeLeft = 0;
-
     badge.style.cssText = \`
       position: absolute !important;
-      top: \${badgeTop}px !important;
-      left: \${badgeLeft}px !important;
+      top: \${relBadgeTop}px !important;
+      left: \${relBadgeLeft}px !important;
       background: #dc2626 !important;
       color: #ffffff !important;
       font-size: 11px !important;
       font-weight: 800 !important;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-      padding: 1px 5px !important;
+      padding: 1px 4px !important;
       border-radius: 3px !important;
       line-height: 14px !important;
       box-shadow: 0 2px 4px rgba(0,0,0,0.6) !important;
