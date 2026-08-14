@@ -1,6 +1,7 @@
 import { Action, Assertion, Checklist, Task } from "./actions";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { ExecutionLogger } from "./execution_logger";
 
 export interface HealingRecord {
   date: string;
@@ -49,6 +50,7 @@ export class TestSerializer {
   private stepCounter = 0;
   private activeOutPath: string | null = null;
   private variables: Record<string, string> = {};
+  public logger: ExecutionLogger = new ExecutionLogger();
 
   startTest(name: string, startUrl: string, appId?: string) {
     this.test = {
@@ -61,6 +63,10 @@ export class TestSerializer {
     };
     this.stepCounter = 0;
     this.variables = {};
+    this.logger = new ExecutionLogger({ testName: name, startUrl });
+    if (this.activeOutPath) {
+      this.logger.setLogPath(this.activeOutPath.replace(/\.json$/, ".log"));
+    }
   }
 
   setVariables(variables: any) {
@@ -79,6 +85,7 @@ export class TestSerializer {
 
   setOutPath(filePath: string) {
     this.activeOutPath = filePath;
+    this.logger.setLogPath(filePath.replace(/\.json$/, ".log"));
   }
 
   logAction(
@@ -117,6 +124,18 @@ export class TestSerializer {
         this.addOrUpdateIssue(issue, stepId);
       }
     }
+
+    this.logger.logStep({
+      stepNumber: this.stepCounter,
+      taskId: options?.taskId,
+      observation: options?.stateDescription,
+      actionIntent: options?.actionIntent,
+      actionKind: action.kind,
+      actionDetails: action,
+      result: options?.actionResult,
+      success: true,
+      assertions: options?.verificationAssertions,
+    });
   }
 
   logFindings(stepId: string, issues?: { description: string; severity: "low" | "medium" | "high" | "critical" }[]) {
@@ -171,8 +190,6 @@ export class TestSerializer {
         existing.affectedStepIds.push(stepId);
       }
       
-      // Keep description if it's more detailed? Or just keep original.
-      // take the higher severity?
       const severityOrder = { low: 0, medium: 1, high: 2, critical: 3 };
       if (severityOrder[issue.severity] > severityOrder[existing.severity]) {
         existing.severity = issue.severity;
@@ -191,6 +208,9 @@ export class TestSerializer {
   updateChecklist(checklist: Checklist) {
     if (this.test) {
       this.test.checklist = checklist;
+      if (checklist.tasks && Array.isArray(checklist.tasks)) {
+        this.logger.logPlan(checklist.currentStateDescription, checklist.tasks);
+      }
     }
   }
 
@@ -221,6 +241,21 @@ export class TestSerializer {
       console.log(`[TestSerializer] Saving test to: ${targetPath}`);
       await fs.mkdir(baseDir, { recursive: true });
       await fs.writeFile(targetPath, JSON.stringify(this.test, null, 2), "utf-8");
+
+      // Save execution log
+      await this.logger.flush();
+      const screenshotsDir = path.join(
+        baseDir,
+        path.basename(targetPath, ".json") + ".screenshots",
+      );
+      try {
+        await fs.mkdir(screenshotsDir, { recursive: true });
+        await fs.writeFile(
+          path.join(screenshotsDir, "execution.log"),
+          this.logger.getRawText(),
+          "utf-8",
+        );
+      } catch (e) {}
     } catch (error: any) {
       console.error(`[TestSerializer] Failed to save test: ${error.message}`);
     }

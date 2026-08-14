@@ -12,4 +12,4 @@
 ☐ Autogenerate value to prefill in the variable
 ✔ Agent to indicate when a variable was used @done(26-07-30 16:49)
 ☐ Drop down variables?
-
+☐ Fix variable pollution problem - maybe planner agent to decide if a variable should be created, then we have a dedicated agent to create variable name and description

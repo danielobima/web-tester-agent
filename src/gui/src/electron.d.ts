@@ -20,6 +20,7 @@ declare global {
       onPlanningState: (callback: (isPlanning: boolean) => void) => () => void;
       onTestIssues: (callback: (issues: any[]) => void) => () => void;
       getSuiteReport: (suitePath: string) => Promise<string>;
+      getSuiteLog: (suitePath: string) => Promise<string>;
 
       // Application Management
       listApplications: () => Promise<any[]>;
@@ -44,9 +45,25 @@ declare global {
 
       // Variables Management
       listVariables: (appId?: string) => Promise<any[]>;
-      createVariable: (config: { appId: string, name: string, type: string, value: string, purpose: string, expiry?: string }) => Promise<any>;
+      createVariable: (config: { appId: string, name: string, type: string, value: string, purpose: string, expiry?: string, testId?: string }) => Promise<any>;
       updateVariable: (varId: string, config: any) => Promise<any>;
       deleteVariable: (varId: string) => Promise<{ success: boolean }>;
+
+      // Auth Profile Management
+      listAuthProfiles: (appId?: string) => Promise<any[]>;
+      getAuthProfileDetails: (profileId: string) => Promise<{
+        profile: any;
+        fileExists: boolean;
+        cookies: any[];
+        origins: any[];
+        rawJson: string;
+      }>;
+      createAuthProfile: (config: { appId: string, name: string, description?: string, expiry?: string, sourceTestId?: string }) => Promise<any>;
+      updateAuthProfile: (profileId: string, config: any) => Promise<any>;
+      deleteAuthProfile: (profileId: string) => Promise<{ success: boolean }>;
+
+      // Precondition Status
+      onPreconditionStatus: (callback: (status: { phase: 'precondition' | 'target' | 'idle'; currentTestId?: string; currentTestName?: string; index?: number; total?: number; status?: 'running' | 'passed' | 'failed'; message?: string }) => void) => () => void;
 
       startTest: (url: string, requirement: string, testId?: string, model?: string) => void;
     };

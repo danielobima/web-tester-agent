@@ -9,6 +9,70 @@ export interface Application {
   createdAt: number;
 }
 
+export type PreconditionType = "test_dependency" | "storage_state" | "variable";
+
+export interface TestDependencyPrecondition {
+  id: string;
+  type: "test_dependency";
+  prerequisiteTestId: string;
+  executionMode?: "auto" | "replay_only" | "agent_only";
+  shareBrowserSession?: boolean;
+  stopOnFailure?: boolean;
+  passVariables?: boolean;
+}
+
+export interface CookieItem {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+}
+
+export interface LocalStorageItem {
+  origin: string;
+  key: string;
+  value: string;
+}
+
+export interface StorageStatePrecondition {
+  id: string;
+  type: "storage_state";
+  source: "direct" | "auth_profile" | "file";
+  authProfileId?: string;
+  cookies?: CookieItem[];
+  localStorage?: LocalStorageItem[];
+  storageStatePath?: string;
+  onMissingOrExpired?: "fail" | "run_fallback_test";
+  fallbackTestId?: string;
+}
+
+export interface VariablePrecondition {
+  id: string;
+  type: "variable";
+  variableNames: string[];
+  onMissingOrExpired?: "fail" | "run_acquisition_test";
+  acquisitionTestId?: string;
+}
+
+export type TestPrecondition =
+  | TestDependencyPrecondition
+  | StorageStatePrecondition
+  | VariablePrecondition;
+
+export interface AuthProfile {
+  id: string;
+  appId: string;
+  name: string;
+  description?: string;
+  storageStatePath: string;
+  updatedAt: number;
+  expiry?: string;
+  sourceTestId?: string;
+}
+
 export interface Test {
   id: string;
   appId: string;
@@ -18,6 +82,10 @@ export interface Test {
   model: string;
   createdAt: number;
   lastRunPath?: string;
+  preconditions?: TestPrecondition[];
+  captureSessionOnSuccess?: boolean;
+  savedAuthProfileId?: string;
+  savedStorageStatePath?: string;
 }
 
 export interface ModelConfig {
@@ -68,9 +136,12 @@ const appsFile = path.join(dataDir, "applications.json");
 const testsFile = path.join(dataDir, "tests.json");
 const configFile = path.join(dataDir, "config.json");
 const variablesFile = path.join(dataDir, "variables.json");
+const authProfilesFile = path.join(dataDir, "auth_profiles.json");
+export const storageStatesDir = path.join(userDataPath, "storage_states");
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
+  await fs.mkdir(storageStatesDir, { recursive: true });
 }
 
 export async function listApplications(): Promise<Application[]> {
@@ -105,6 +176,57 @@ export async function listTests(appId?: string): Promise<Test[]> {
 export async function saveTests(tests: Test[]) {
   await ensureDataDir();
   await fs.writeFile(testsFile, JSON.stringify(tests, null, 2), "utf-8");
+}
+
+export async function listAuthProfiles(appId?: string): Promise<AuthProfile[]> {
+  await ensureDataDir();
+  try {
+    const content = await fs.readFile(authProfilesFile, "utf-8");
+    const profiles: AuthProfile[] = JSON.parse(content);
+    const now = Date.now();
+    const activeProfiles = profiles.filter((p) => {
+      if (p.expiry) {
+        const expiryTime = new Date(p.expiry).getTime();
+        if (!isNaN(expiryTime) && expiryTime <= now) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (activeProfiles.length < profiles.length) {
+      await saveAuthProfiles(activeProfiles);
+    }
+
+    if (appId) {
+      return activeProfiles.filter((p) => p.appId === appId);
+    }
+    return activeProfiles;
+  } catch (error) {
+    return [];
+  }
+}
+
+export async function saveAuthProfiles(profiles: AuthProfile[]): Promise<void> {
+  await ensureDataDir();
+  await fs.writeFile(authProfilesFile, JSON.stringify(profiles, null, 2), "utf-8");
+}
+
+export async function saveAuthProfile(profile: AuthProfile): Promise<void> {
+  const profiles = await listAuthProfiles();
+  const index = profiles.findIndex((p) => p.id === profile.id);
+  if (index >= 0) {
+    profiles[index] = profile;
+  } else {
+    profiles.push(profile);
+  }
+  await saveAuthProfiles(profiles);
+}
+
+export async function deleteAuthProfile(profileId: string): Promise<void> {
+  const profiles = await listAuthProfiles();
+  const filtered = profiles.filter((p) => p.id !== profileId);
+  await saveAuthProfiles(filtered);
 }
 
 export async function getConfig(): Promise<AppConfig> {
@@ -188,3 +310,64 @@ export function resolveVariables(appVars: Variable[], testVars: Variable[]): Var
   }
   return Array.from(map.values());
 }
+
+/**
+ * Resolves the dependency execution chain for a test using topological sorting.
+ * Detects circular dependencies and orders prerequisites so they execute before dependent tests.
+ */
+export function resolveTestDependencyChain(
+  targetTestId: string,
+  allTests: Test[],
+): { executionChain: Test[]; dependencyPreconditions: Map<string, TestDependencyPrecondition> } {
+  const testMap = new Map<string, Test>();
+  for (const t of allTests) {
+    testMap.set(t.id, t);
+  }
+
+  const targetTest = testMap.get(targetTestId);
+  if (!targetTest) {
+    throw new Error(`Target test with ID '${targetTestId}' not found.`);
+  }
+
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const executionChain: Test[] = [];
+  const dependencyPreconditions = new Map<string, TestDependencyPrecondition>();
+
+  function dfs(currentTestId: string) {
+    if (visiting.has(currentTestId)) {
+      throw new Error(
+        `Circular dependency detected involving test "${testMap.get(currentTestId)?.name || currentTestId}".`,
+      );
+    }
+    if (visited.has(currentTestId)) {
+      return;
+    }
+
+    visiting.add(currentTestId);
+    const currentTest = testMap.get(currentTestId);
+    if (currentTest?.preconditions) {
+      for (const pre of currentTest.preconditions) {
+        if (pre.type === "test_dependency" && pre.prerequisiteTestId) {
+          if (!testMap.has(pre.prerequisiteTestId)) {
+            throw new Error(
+              `Prerequisite test ID '${pre.prerequisiteTestId}' referenced by "${currentTest.name}" does not exist.`,
+            );
+          }
+          dependencyPreconditions.set(pre.prerequisiteTestId, pre);
+          dfs(pre.prerequisiteTestId);
+        }
+      }
+    }
+
+    visiting.delete(currentTestId);
+    visited.add(currentTestId);
+    if (currentTest) {
+      executionChain.push(currentTest);
+    }
+  }
+
+  dfs(targetTestId);
+  return { executionChain, dependencyPreconditions };
+}
+

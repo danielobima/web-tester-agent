@@ -836,6 +836,7 @@ export const TaskSchema = z.object({
     .describe("The current operational status of the task"),
   result: z
     .string()
+    .nullable()
     .optional()
     .describe("Summary of what was achieved or why it failed"),
 });
@@ -851,6 +852,7 @@ export const ChecklistSchema = z.object({
     .describe("The sequence of high-level tasks to achieve the goal"),
   nextTaskId: z
     .string()
+    .nullable()
     .optional()
     .describe("The ID of the task that should be prioritized next"),
   finished: z
@@ -860,6 +862,7 @@ export const ChecklistSchema = z.object({
     ),
   screenshot: z
     .string()
+    .nullable()
     .optional()
     .describe("Base64 encoded screenshot of the final state"),
   issues: z.array(IssueSchema).default([]),
