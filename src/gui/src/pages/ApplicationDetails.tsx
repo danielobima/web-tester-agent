@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Icons } from "../components/ui/Icons";
 
 import { AutocompleteInput } from "../components/ui/AutocompleteInput";
+import { AuthProfileViewer } from "../components/features/AuthProfileViewer";
 
 interface Test {
   id: string;
@@ -21,9 +22,21 @@ interface Application {
   description?: string;
 }
 
+export interface AuthProfile {
+  id: string;
+  appId: string;
+  name: string;
+  description?: string;
+  storageStatePath: string;
+  updatedAt: number;
+  expiry?: string;
+  sourceTestId?: string;
+}
+
 export interface Variable {
   id: string;
   appId: string;
+  testId?: string;
   name: string;
   type: "string" | "number" | "boolean" | "secret" | "json";
   value: string;
@@ -62,9 +75,10 @@ export const ApplicationDetails = () => {
   const [app, setApp] = useState<Application | null>(null);
   const [tests, setTests] = useState<Test[]>([]);
   const [variables, setVariables] = useState<Variable[]>([]);
+  const [authProfiles, setAuthProfiles] = useState<AuthProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
-  const [activeTab, setActiveTab] = useState<"tests" | "variables">("tests");
+  const [activeTab, setActiveTab] = useState<"tests" | "variables" | "auth_profiles">("tests");
   
   const [models, setModels] = useState<any[]>([]);
   const [defaultModelId, setDefaultModelId] = useState("");
@@ -73,6 +87,13 @@ export const ApplicationDetails = () => {
   const [newUrl, setNewUrl] = useState("");
   const [newRequirement, setNewRequirement] = useState("");
   const [newModel, setNewModel] = useState("");
+
+  // Auth Profile Modal & Inspector State
+  const [viewingAuthProfileId, setViewingAuthProfileId] = useState<string | null>(null);
+  const [isCreatingAuthProfile, setIsCreatingAuthProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState("");
+  const [newProfileDesc, setNewProfileDesc] = useState("");
+  const [newProfileSourceTestId, setNewProfileSourceTestId] = useState("");
 
   // Variables modal and form state
   const [isCreatingVariable, setIsCreatingVariable] = useState(false);
@@ -100,6 +121,9 @@ export const ApplicationDetails = () => {
 
       const varsData = await window.electron.listVariables(appId);
       setVariables(varsData);
+
+      const profilesData = await window.electron.listAuthProfiles(appId);
+      setAuthProfiles(profilesData);
 
       const config = await window.electron.getConfig();
       setModels(config.models);
@@ -213,6 +237,38 @@ export const ApplicationDetails = () => {
     }
   };
 
+  const handleCreateAuthProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProfileName.trim() || !appId) return;
+
+    try {
+      const created = await window.electron.createAuthProfile({
+        appId,
+        name: newProfileName.trim(),
+        description: newProfileDesc.trim() || undefined,
+        sourceTestId: newProfileSourceTestId || undefined,
+      });
+      setAuthProfiles([...authProfiles, created]);
+      setIsCreatingAuthProfile(false);
+      setNewProfileName("");
+      setNewProfileDesc("");
+      setNewProfileSourceTestId("");
+    } catch (error) {
+      console.error("Failed to create auth profile:", error);
+    }
+  };
+
+  const handleDeleteAuthProfile = async (profileId: string) => {
+    if (confirm("Are you sure you want to delete this Auth Profile and its saved session file?")) {
+      try {
+        await window.electron.deleteAuthProfile(profileId);
+        setAuthProfiles(authProfiles.filter(p => p.id !== profileId));
+      } catch (error) {
+        console.error("Failed to delete auth profile:", error);
+      }
+    }
+  };
+
   if (isLoading) {
     return <div className="flex-1 flex items-center justify-center bg-surface text-on-surface">Loading...</div>;
   }
@@ -259,6 +315,16 @@ export const ApplicationDetails = () => {
             }`}
           >
             <Icons.Code /> Variables ({variables.length})
+          </button>
+          <button 
+            onClick={() => setActiveTab("auth_profiles")}
+            className={`flex items-center gap-2 py-4 border-b-2 transition-all font-bold text-sm ${
+              activeTab === "auth_profiles"
+                ? "border-primary text-primary"
+                : "border-transparent text-on-surface/40 hover:text-on-surface"
+            }`}
+          >
+            <Icons.Lock /> Auth Profiles ({authProfiles.length})
           </button>
         </div>
 
@@ -401,6 +467,98 @@ export const ApplicationDetails = () => {
                           <strong>Expiry:</strong> {formatExpiry(v.expiry)}
                         </p>
                       )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Tab Contents: Auth Profiles */}
+        {activeTab === "auth_profiles" && (
+          <>
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-xl font-bold text-on-surface/60">Auth Profiles ({authProfiles.length})</h2>
+                <p className="text-xs text-on-surface/40 mt-0.5">
+                  Saved authentication sessions, login cookies, and local storage snapshots
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  setNewProfileName("");
+                  setNewProfileDesc("");
+                  setNewProfileSourceTestId("");
+                  setIsCreatingAuthProfile(true);
+                }}
+                className="bg-primary text-white px-6 py-3 rounded-md font-bold text-sm shadow-premium hover:opacity-90 transition-all flex items-center gap-2"
+              >
+                <Icons.Plus /> New Profile
+              </button>
+            </div>
+
+            {authProfiles.length === 0 ? (
+              <div className="h-[300px] flex flex-col items-center justify-center text-on-surface/20 bg-surface-low/30 rounded-2xl border-2 border-dashed border-on-surface/10">
+                <Icons.Lock className="w-10 h-10 text-on-surface/20" />
+                <p className="mt-4 font-bold text-on-surface/40">No auth profiles created yet</p>
+                <p className="text-xs text-on-surface/30 mt-1 max-w-sm text-center">
+                  Create a named profile or enable "Capture session state" on a login test to save cookies.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {authProfiles.map(p => (
+                  <div key={p.id} className="group bg-surface-low p-6 rounded-xl border border-on-surface/5 flex flex-col justify-between shadow-sm hover:border-primary/45 transition-all">
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center font-bold text-xs">
+                            <Icons.Lock className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-on-surface text-base">{p.name}</h3>
+                            <span className="text-[10px] text-on-surface/40">
+                              Updated {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : "Never"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteAuthProfile(p.id);
+                          }}
+                          className="p-1.5 text-on-surface/30 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                          title="Delete Profile"
+                        >
+                          <Icons.Trash className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {p.description && (
+                        <p className="text-xs text-on-surface/60 font-medium mb-3">
+                          {p.description}
+                        </p>
+                      )}
+
+                      {p.sourceTestId && (
+                        <div className="p-2.5 rounded-lg bg-surface-lowest border border-on-surface/5 flex items-center justify-between text-xs mb-4">
+                          <span className="text-on-surface/40 text-[11px] font-bold uppercase">Source Test</span>
+                          <span className="font-bold text-primary truncate max-w-[200px]">
+                            {tests.find(t => t.id === p.sourceTestId)?.name || "Login Test"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-on-surface/5 flex items-center justify-between">
+                      <button 
+                        onClick={() => setViewingAuthProfileId(p.id)}
+                        className="w-full bg-primary/10 hover:bg-primary/20 text-primary py-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Icons.Lock className="w-3.5 h-3.5" /> Inspect Cookies & Storage
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -683,6 +841,86 @@ export const ApplicationDetails = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Create Auth Profile Modal */}
+      {isCreatingAuthProfile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="absolute inset-0" onClick={() => setIsCreatingAuthProfile(false)} />
+          <div className="relative w-full max-w-lg bg-surface-low border border-on-surface/10 rounded-2xl shadow-2xl p-6 space-y-6 animate-in zoom-in-95 duration-200">
+            <div>
+              <h3 className="text-xl font-bold text-on-surface font-display">Create Auth Profile</h3>
+              <p className="text-xs text-on-surface/40 mt-1">
+                Save an authentication session container for this application.
+              </p>
+            </div>
+
+            <form onSubmit={handleCreateAuthProfile} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Profile Name</label>
+                <input
+                  required
+                  autoFocus
+                  placeholder="e.g. Portal Admin, Standard Customer"
+                  value={newProfileName}
+                  onChange={(e) => setNewProfileName(e.target.value)}
+                  className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary text-on-surface font-medium text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Description (Optional)</label>
+                <input
+                  placeholder="e.g. Admin session with full dashboard permissions"
+                  value={newProfileDesc}
+                  onChange={(e) => setNewProfileDesc(e.target.value)}
+                  className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary text-on-surface text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-on-surface/40">Source Test (Optional)</label>
+                <select
+                  value={newProfileSourceTestId}
+                  onChange={(e) => setNewProfileSourceTestId(e.target.value)}
+                  className="w-full bg-surface-lowest border border-on-surface/10 rounded-lg px-4 py-3 outline-none focus:border-primary text-on-surface text-sm font-medium"
+                >
+                  <option value="">-- No Source Test Linked --</option>
+                  {tests.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.url})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingAuthProfile(false)}
+                  className="flex-1 py-3 font-bold text-sm text-on-surface/60 hover:bg-on-surface/5 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newProfileName.trim()}
+                  className="flex-1 bg-primary text-white py-3 rounded-lg font-bold text-sm shadow-premium hover:opacity-90 disabled:opacity-50"
+                >
+                  Create Profile
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Inspect Cookies & Storage Modal */}
+      {viewingAuthProfileId && (
+        <AuthProfileViewer
+          profileId={viewingAuthProfileId}
+          onClose={() => setViewingAuthProfileId(null)}
+        />
       )}
     </div>
   );

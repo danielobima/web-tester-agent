@@ -76,16 +76,24 @@ export function prepareImagePart(image: Buffer | Uint8Array | string): {
  * Helper to get providerOptions for generateObject based on the model's configuration.
  */
 export function getProviderOptions(model: any): Record<string, any> | undefined {
-  if (model && model.agentConfig && model.agentConfig.provider === "ollama") {
-    if (model.agentConfig.ollamaThink !== undefined) {
-      return {
-        ollama: {
-          think: model.agentConfig.ollamaThink,
-        },
+  const provider = model?.agentConfig?.provider;
+  const options: Record<string, any> = {};
+
+  if (provider === "openai") {
+    options.openai = {
+      strictJsonSchema: false,
+    };
+  }
+
+  if (provider === "ollama") {
+    if (model?.agentConfig?.ollamaThink !== undefined) {
+      options.ollama = {
+        think: model.agentConfig.ollamaThink,
       };
     }
   }
-  return undefined;
+
+  return Object.keys(options).length > 0 ? options : undefined;
 }
 
 /**
@@ -96,14 +104,28 @@ export async function generateObjectWithTimeout<T>(
   options: Omit<Parameters<typeof generateObject>[0], "schema"> & {
     schema: z.ZodSchema<T> | import("ai").Schema<T>;
     abortSignal?: AbortSignal;
+    providerOptions?: Record<string, any>;
   }
 ): Promise<GenerateObjectResult<T>> {
   const model = options.model;
   const config = (model as any).agentConfig as ModelConfig | undefined;
   const timeoutSec = config?.timeout;
 
+  const defaultProviderOptions = getProviderOptions(model);
+  const mergedProviderOptions = defaultProviderOptions || options.providerOptions
+    ? {
+        ...defaultProviderOptions,
+        ...options.providerOptions,
+      }
+    : undefined;
+
+  const callOptions = {
+    ...options,
+    providerOptions: mergedProviderOptions,
+  };
+
   if (!timeoutSec && !options.abortSignal) {
-    return generateObject(options as any) as any;
+    return generateObject(callOptions as any) as any;
   }
 
   const controller = new AbortController();
@@ -129,7 +151,7 @@ export async function generateObjectWithTimeout<T>(
 
   try {
     return await generateObject({
-      ...options,
+      ...callOptions,
       abortSignal: controller.signal,
     } as any) as any;
   } finally {

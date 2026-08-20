@@ -67,10 +67,11 @@ export const SOM_INJECTION_SCRIPT = `
   \`;
 
   // Candidate interactive elements
+  // Candidate interactive elements
   const baseSelectors = [
-    'a[href]',
+    'a',
     'button',
-    'input',
+    'input:not([type="hidden"])',
     'select',
     'textarea',
     'summary',
@@ -82,7 +83,13 @@ export const SOM_INJECTION_SCRIPT = `
     '[role="menuitem"]',
     '[role="tab"]',
     '[role="radio"]',
+    '[role="option"]',
     '[contenteditable="true"]',
+    '.MuiButtonBase-root',
+    '.MuiListItemButton-root',
+    '.MuiTab-root',
+    '.btn',
+    '.button',
     'svg',
     'img'
   ].join(',');
@@ -117,51 +124,30 @@ export const SOM_INJECTION_SCRIPT = `
       return true;
     }
 
-    // Check if an active modal / dialog overlay exists on the page
+    // Check if an active, genuinely visible modal / dialog overlay exists on the page
     const activeModals = Array.from(document.querySelectorAll(
-      'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"], .modal-backdrop, .modal.show, [aria-modal="true"]'
+      'dialog[open], [role="dialog"]:not([aria-hidden="true"]), [role="alertdialog"]:not([aria-hidden="true"]), .modal.show'
     )).filter(m => {
       const s = window.getComputedStyle(m);
-      return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
+      const mRect = m.getBoundingClientRect();
+      return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0.5 && mRect.width > 150 && mRect.height > 150;
     });
 
     if (activeModals.length > 0) {
-      // If an active modal exists and this element is outside it, it is blocked
+      // If an active modal genuinely exists and is visible on screen, prioritize elements inside the modal
       const isInsideAnyModal = activeModals.some(m => m.contains(el));
       if (!isInsideAnyModal) {
         return true;
       }
     }
 
-    // Geometric hit-testing via elementFromPoint across 5 sample points
-    const points = [
-      { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
-      { x: rect.left + 3, y: rect.top + 3 },
-      { x: rect.right - 3, y: rect.top + 3 },
-      { x: rect.left + 3, y: rect.bottom - 3 },
-      { x: rect.right - 3, y: rect.bottom - 3 },
-    ];
-
-    let hits = 0;
-    for (const p of points) {
-      const px = Math.max(0, Math.min(window.innerWidth - 1, p.x));
-      const py = Math.max(0, Math.min(window.innerHeight - 1, p.y));
-
-      const topEl = document.elementFromPoint(px, py);
-      if (!topEl) continue;
-
-      if (topEl === el || el.contains(topEl) || (topEl.contains(el) && !['body', 'html', 'main'].includes(topEl.tagName.toLowerCase()))) {
-        hits++;
-      }
-    }
-
-    return hits === 0;
+    return false;
   }
 
-  // Compute exact visible clipped rectangle intersecting with viewport, ancestor scroll containers, and sticky headers
+  // Compute exact visible clipped rectangle intersecting with viewport and ancestor scroll containers
   function getVisibleClippedRect(el) {
     const rect = el.getBoundingClientRect();
-    if (rect.width < 5 || rect.height < 5) return null;
+    if (rect.width < 4 || rect.height < 4) return null;
 
     // 1. Viewport boundary intersection
     let top = Math.max(0, rect.top);
@@ -173,53 +159,44 @@ export const SOM_INJECTION_SCRIPT = `
       return null;
     }
 
-    // 2. Ancestor scroll / overflow container clipping
-    let p = el.parentElement;
-    while (p && p !== document.body && p !== document.documentElement) {
-      const pStyle = window.getComputedStyle(p);
-      const oy = pStyle.overflowY;
-      const ox = pStyle.overflowX;
-      if (['hidden', 'scroll', 'auto', 'clip'].includes(oy) || ['hidden', 'scroll', 'auto', 'clip'].includes(ox)) {
-        const pRect = p.getBoundingClientRect();
-        top = Math.max(top, pRect.top);
-        bottom = Math.min(bottom, pRect.bottom);
-        left = Math.max(left, pRect.left);
-        right = Math.min(right, pRect.right);
-
-        if (bottom <= top || right <= left) {
-          return null;
+    // 2. Ancestor scroll container clipping (ONLY for non-fixed elements inside actual scrolling ancestors)
+    const elStyle = window.getComputedStyle(el);
+    if (elStyle.position !== 'fixed') {
+      let p = el.parentElement;
+      while (p && p !== document.body && p !== document.documentElement) {
+        const pStyle = window.getComputedStyle(p);
+        if (pStyle.position === 'fixed') {
+          // Inside a fixed container (like MuiDrawer-paper or sticky sidebar) - clip to this fixed container
+          const pRect = p.getBoundingClientRect();
+          top = Math.max(top, pRect.top);
+          bottom = Math.min(bottom, pRect.bottom);
+          left = Math.max(left, pRect.left);
+          right = Math.min(right, pRect.right);
+          break;
         }
-      }
-      p = p.parentElement;
-    }
 
-    // 3. Fixed / sticky header occlusion clipping from top
-    const fixedHeaders = Array.from(document.querySelectorAll(
-      'header, nav, [style*="position: fixed"], [style*="position: sticky"], [class*="sticky"], [class*="header"], [class*="navbar"]'
-    )).filter(o => {
-      if (o === el || o.contains(el) || el.contains(o)) return false;
-      const os = window.getComputedStyle(o);
-      if (os.display === 'none' || os.visibility === 'hidden' || parseFloat(os.opacity) === 0) return false;
-      const pos = os.position;
-      return pos === 'fixed' || pos === 'sticky';
-    });
+        const oy = pStyle.overflowY;
+        const ox = pStyle.overflowX;
+        const isScroll = ['hidden', 'scroll', 'auto', 'clip'].includes(oy) || ['hidden', 'scroll', 'auto', 'clip'].includes(ox);
+        if (isScroll && (p.scrollHeight > p.clientHeight || p.scrollWidth > p.clientWidth)) {
+          const pRect = p.getBoundingClientRect();
+          top = Math.max(top, pRect.top);
+          bottom = Math.min(bottom, pRect.bottom);
+          left = Math.max(left, pRect.left);
+          right = Math.min(right, pRect.right);
 
-    for (const fo of fixedHeaders) {
-      const foRect = fo.getBoundingClientRect();
-      if (foRect.top <= 5 && foRect.bottom > top && foRect.bottom < bottom && foRect.left < right && foRect.right > left) {
-        const midX = Math.max(left + 5, Math.min(right - 5, (left + right) / 2));
-        const sampleY = top + 2;
-        const topHit = document.elementFromPoint(midX, sampleY);
-        if (topHit && (fo === topHit || fo.contains(topHit))) {
-          top = Math.max(top, foRect.bottom);
+          if (bottom <= top || right <= left) {
+            return null;
+          }
         }
+        p = p.parentElement;
       }
     }
 
     const width = right - left;
     const height = bottom - top;
 
-    if (width < 6 || height < 6) {
+    if (width < 4 || height < 4) {
       return null;
     }
 
@@ -232,6 +209,34 @@ export const SOM_INJECTION_SCRIPT = `
       height,
       originalRect: rect,
     };
+  }
+
+  // Helper to check if an element is an atomic interactive unit
+  function isAtomicInteractive(el) {
+    if (!el || !(el instanceof Element)) return false;
+    const tag = el.tagName.toLowerCase();
+    if (['button', 'select', 'textarea', 'summary'].includes(tag)) return true;
+    if (tag === 'input' && el.type !== 'hidden') return true;
+    if (tag === 'a' && (el.hasAttribute('href') || el.hasAttribute('onclick') || el.getAttribute('role') === 'button' || el.getAttribute('role') === 'link')) return true;
+
+    const role = el.getAttribute('role');
+    if (role && ['button', 'link', 'tab', 'menuitem', 'checkbox', 'switch', 'radio', 'option'].includes(role)) {
+      return true;
+    }
+
+    if (el.hasAttribute('onclick') || el.onclick) {
+      return true;
+    }
+
+    if (el.classList.contains('MuiButtonBase-root') || el.classList.contains('MuiListItemButton-root') || el.classList.contains('btn') || el.classList.contains('button')) {
+      return true;
+    }
+
+    if (el.getAttribute('tabindex') === '0' && !['body', 'html', 'main'].includes(tag)) {
+      return true;
+    }
+
+    return false;
   }
 
   // Filter visible elements in viewport that are not occluded
@@ -265,46 +270,34 @@ export const SOM_INJECTION_SCRIPT = `
   });
 
   // Hierarchy pruning:
-  // If an element is a child of an already interactive parent (e.g. text divs inside a clickable card,
-  // or spans inside a button) and only has pointer cursor by inheritance, prune the child.
-  // Independent interactive controls (like <input>, <select>, <textarea>, <a href>) inside a container remain preserved.
+  // 1. If el is an atomic interactive unit (button, link, sidebar item, etc.), preserve it.
+  // 2. If el is an inner sub-node (span, svg, text div) inside an atomic interactive parent, prune el so the badge is placed on the parent button.
+  // 3. If el is a large container (nav, ul, sidebar, card group) with >=2 interactive children, prune the container.
   const prunedElements = visibleCandidates.filter(el => {
-    const tag = el.tagName.toLowerCase();
-    const isExplicitInteractive = ['input', 'select', 'textarea', 'a', 'button'].includes(tag);
+    const isElAtomic = isAtomicInteractive(el);
 
     let parent = el.parentElement;
-    while (parent) {
+    while (parent && parent !== document.body && parent !== document.documentElement) {
       if (visibleCandidates.includes(parent)) {
-        const pTag = parent.tagName.toLowerCase();
-        const pStyle = window.getComputedStyle(parent);
-
-        const isParentInteractive = (
-          pTag === 'button' ||
-          pTag === 'a' ||
-          pTag === 'label' ||
-          parent.getAttribute('role') === 'button' ||
-          parent.getAttribute('role') === 'radio' ||
-          parent.getAttribute('role') === 'checkbox' ||
-          parent.classList.contains('pointer-card') ||
-          parent.classList.contains('icon-btn') ||
-          parent.classList.contains('chip') ||
-          parent.classList.contains('plan-card') ||
-          (pStyle.cursor === 'pointer')
-        );
-
-        if (isParentInteractive) {
-          // If child is merely text/decorative (div, span, p, heading, text label) inside an interactive parent, prune it
-          if (!isExplicitInteractive || (tag === 'label' && pTag === 'label') || (tag === 'span') || (tag === 'div')) {
+        if (isAtomicInteractive(parent)) {
+          // Parent is already an atomic interactive element (e.g. <div role="button">, <a>, <button>)
+          if (!isElAtomic) {
             return false;
           }
-          // If parent is a button or anchor, prune even nested SVGs/spans inside the button
-          if (pTag === 'button' || pTag === 'a') {
+          if (['a', 'button'].includes(parent.tagName.toLowerCase()) || parent.getAttribute('role') === 'button') {
             return false;
           }
         }
       }
       parent = parent.parentElement;
     }
+
+    // If el is a container with multiple interactive children, prune the container
+    const childInteractiveCount = el.querySelectorAll('a, button, input, select, textarea, [role="button"], [role="link"], [role="tab"], .MuiButtonBase-root, .MuiListItemButton-root').length;
+    if (childInteractiveCount >= 2 && !['button', 'a'].includes(el.tagName.toLowerCase())) {
+      return false;
+    }
+
     return true;
   });
 
@@ -410,8 +403,11 @@ export const SOM_INJECTION_SCRIPT = `
 
   // Render naturally clipped bounding boxes and high-contrast red badges
   for (const el of prunedElements) {
+    const vRect = el.__som_visible_rect__ || getVisibleClippedRect(el);
+    if (!vRect || !vRect.width || !vRect.height || vRect.width < 4 || vRect.height < 4) {
+      continue;
+    }
     const ref = currentRef++;
-    const vRect = el.__som_visible_rect__ || getVisibleClippedRect(el) || el.getBoundingClientRect();
     const style = window.getComputedStyle(el);
 
     // Save mapping to window object and stamp data attribute
@@ -590,7 +586,26 @@ export class SomManager {
       }
       case "fill": {
         await locator.scrollIntoViewIfNeeded();
-        await locator.fill(value || "");
+        try {
+          await locator.fill(value || "");
+        } catch (fillErr: any) {
+          // If the marked element is a wrapper (div, label, custom form group), search for inner input
+          try {
+            const innerInput = locator.locator("input, textarea, [contenteditable='true']").first();
+            if ((await innerInput.count()) > 0) {
+              await innerInput.scrollIntoViewIfNeeded();
+              await innerInput.fill(value || "");
+            } else {
+              // Fallback: Click to focus and type with keyboard
+              await locator.click({ force: true });
+              await this.page.keyboard.press("ControlOrMeta+a");
+              await this.page.keyboard.press("Backspace");
+              await this.page.keyboard.type(value || "", { delay: 20 });
+            }
+          } catch (innerErr) {
+            throw fillErr;
+          }
+        }
         return { success: true, message: `Filled element #${ref} with "${value}"` };
       }
       case "select": {

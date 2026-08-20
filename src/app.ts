@@ -116,24 +116,6 @@ app.whenReady().then(async () => {
     async (event, { url, requirement, testId, model }) => {
       const browser = new BrowserManager();
       const testStartTime = Date.now();
-      const serializer = new TestSerializer();
-      const lastRunPath = path.join(app.getPath("userData"), "last-run.json");
-
-      const suiteName = requirement
-        .slice(0, 30)
-        .replace(/[^a-z0-9]/gi, "_")
-        .toLowerCase();
-      const timestamp = Date.now();
-      const suitePath = path.join(
-        suitesDir,
-        `suite-${suiteName}-${timestamp}.json`,
-      );
-      const sessionScreenshotsDir = path.join(
-        suitesDir,
-        `suite-${suiteName}-${timestamp}.screenshots`,
-      );
-      await fs.mkdir(sessionScreenshotsDir, { recursive: true });
-
       const artifactsDir = app.getPath("userData");
       const config = await data.getConfig();
       const modelConfig =
@@ -152,118 +134,364 @@ app.whenReady().then(async () => {
           modelConfig.supportsVision,
         );
 
-      serializer.startTest(requirement, url);
-      serializer.setOutPath(suitePath);
-
-      let appId = "";
-      if (testId) {
-        try {
-          const tests = await data.listTests();
-          const test = tests.find((t) => t.id === testId);
-          if (test) {
-            appId = test.appId;
-          }
-        } catch (e) {
-          console.warn("[IPC] Failed to find appId for test:", e);
-        }
-      }
-
-      const serializedTest = serializer.getTest();
-      if (serializedTest) {
-        if (appId) serializedTest.appId = appId;
-        if (testId) serializedTest.testId = testId;
-      }
-
       activeTestController = new AbortController();
-      try {
-        await browser.init(config.headless || false);
-        await browser.execute({ kind: "navigate", url });
-        const runner = config.visualFirst ? runVisualAgent : runAgent;
-        await runner(
-          requirement,
-          browser,
-          aiModel,
-          serializer,
-          artifactsDir,
-          false,
-          false,
-          (update) => {
-            if (mainWindow) mainWindow.webContents.send("test-step", update);
-          },
-          (checklist) => {
-            if (mainWindow)
-              mainWindow.webContents.send("test-checklist", checklist);
-          },
-          async (checklist) => {
-            if (!mainWindow) return { action: "accept" };
-            return new Promise((resolve, reject) => {
-              planApprovalPromise = { resolve, reject };
-              mainWindow?.webContents.send("plan-approval-request", checklist);
-            });
-          },
-          async (checklist) => {
-            if (!mainWindow) return { action: "validate" };
-            return new Promise((resolve, reject) => {
-              goalValidationPromise = { resolve, reject };
-              mainWindow?.webContents.send("execution-finished", checklist);
-            });
-          },
-          (planning) => {
-            if (mainWindow)
-              mainWindow.webContents.send("test-planning-state", planning);
-          },
-          async (checklist) => {
-            if (!mainWindow) return { action: "resume" };
-            if (!isPaused) return { action: "resume" };
+      let activeSerializer: TestSerializer | null = null;
 
-            return new Promise((resolve, reject) => {
-              pausePromise = { resolve, reject };
-              mainWindow?.webContents.send("pause-request", checklist);
+      try {
+        const allTests = await data.listTests();
+        let targetTest: data.Test | null = null;
+        let appId = "";
+
+        if (testId) {
+          targetTest = allTests.find((t) => t.id === testId) || null;
+          if (targetTest) {
+            appId = targetTest.appId;
+          }
+        }
+
+        // Build execution chain for prerequisites + target test
+        let executionChain: data.Test[] = [];
+        let dependencyMap = new Map<string, data.TestDependencyPrecondition>();
+
+        if (targetTest) {
+          const resolved = data.resolveTestDependencyChain(targetTest.id, allTests);
+          executionChain = resolved.executionChain;
+          dependencyMap = resolved.dependencyPreconditions;
+        } else {
+          executionChain = [
+            {
+              id: testId || `adhoc-${Date.now()}`,
+              appId,
+              name: requirement.slice(0, 40),
+              url,
+              requirement,
+              model: model || config.defaultModelId || "gemini-1.5-flash",
+              createdAt: Date.now(),
+            },
+          ];
+        }
+
+        // Check for storage_state or variable preconditions on the target test
+        let initialStorageStatePath: string | undefined = undefined;
+        const mainTarget = executionChain[executionChain.length - 1];
+
+        if (mainTarget.preconditions) {
+          // 1. Variable Preconditions validation & on-demand acquisition
+          for (const pre of mainTarget.preconditions) {
+            if (pre.type === "variable") {
+              const activeVariables = await data.listVariables(appId);
+              for (const varName of pre.variableNames) {
+                const found = activeVariables.find((v) => v.name === varName);
+                if (!found) {
+                  if (pre.onMissingOrExpired === "run_acquisition_test" && pre.acquisitionTestId) {
+                    const acqTest = allTests.find((t) => t.id === pre.acquisitionTestId);
+                    if (acqTest && !executionChain.some((t) => t.id === acqTest.id)) {
+                      console.log(`[Precondition] Injecting variable acquisition test "${acqTest.name}"`);
+                      executionChain.unshift(acqTest);
+                    }
+                  } else {
+                    throw new Error(`Required variable "${varName}" is missing or expired.`);
+                  }
+                }
+              }
+            }
+          }
+
+          // 2. Storage State / Auth Profile Preconditions
+          for (const pre of mainTarget.preconditions) {
+            if (pre.type === "storage_state") {
+              if (pre.source === "auth_profile" && pre.authProfileId) {
+                const profiles = await data.listAuthProfiles(appId);
+                const profile = profiles.find((p) => p.id === pre.authProfileId);
+                let stateValid = false;
+
+                if (profile?.storageStatePath) {
+                  try {
+                    await fs.access(profile.storageStatePath);
+                    stateValid = true;
+                  } catch (e) {
+                    stateValid = false;
+                  }
+                }
+
+                if (!stateValid) {
+                  const fallbackId = pre.fallbackTestId || profile?.sourceTestId;
+                  if (pre.onMissingOrExpired === "run_fallback_test" && fallbackId) {
+                    const fallbackTest = allTests.find((t) => t.id === fallbackId);
+                    if (fallbackTest && !executionChain.some((t) => t.id === fallbackTest.id)) {
+                      console.log(`[Precondition] Injecting auth fallback test "${fallbackTest.name}"`);
+                      executionChain.unshift(fallbackTest);
+                    }
+                  } else {
+                    throw new Error(
+                      `Auth Profile "${profile?.name || pre.authProfileId}" is missing, expired, or has no valid session file.`,
+                    );
+                  }
+                } else if (profile?.storageStatePath) {
+                  initialStorageStatePath = profile.storageStatePath;
+                }
+              } else if (pre.source === "file" && pre.storageStatePath) {
+                initialStorageStatePath = pre.storageStatePath;
+              }
+            }
+          }
+        }
+
+        // Initialize browser with any resolved storage state
+        await browser.init(config.headless || false, true, initialStorageStatePath);
+
+        // Inject direct cookies and local storage if configured on target test
+        if (mainTarget.preconditions) {
+          for (const pre of mainTarget.preconditions) {
+            if (pre.type === "storage_state" && pre.source === "direct") {
+              if (pre.cookies && pre.cookies.length > 0) {
+                await browser.injectCookies(pre.cookies);
+              }
+              if (pre.localStorage && pre.localStorage.length > 0) {
+                await browser.injectLocalStorage(pre.localStorage);
+              }
+            }
+          }
+        }
+
+        const totalPrereqs = executionChain.length - 1;
+        let lastSuitePath = "";
+
+        // Execute chain (Prerequisites first, then Target Test)
+        for (let i = 0; i < executionChain.length; i++) {
+          const currentTest = executionChain[i];
+          const isTarget = i === executionChain.length - 1;
+          const isPrereq = !isTarget;
+
+          if (isPrereq) {
+            if (mainWindow) {
+              mainWindow.webContents.send("test-precondition-status", {
+                phase: "precondition",
+                currentTestId: currentTest.id,
+                currentTestName: currentTest.name,
+                index: i + 1,
+                total: totalPrereqs,
+                status: "running",
+              });
+            }
+          } else {
+            if (mainWindow) {
+              mainWindow.webContents.send("test-precondition-status", {
+                phase: "target",
+                currentTestId: currentTest.id,
+                currentTestName: currentTest.name,
+                status: "running",
+              });
+            }
+          }
+
+          const currentSuiteName = currentTest.requirement
+            .slice(0, 30)
+            .replace(/[^a-z0-9]/gi, "_")
+            .toLowerCase();
+          const timestamp = Date.now();
+          const currentSuitePath = path.join(
+            suitesDir,
+            `suite-${currentSuiteName}-${timestamp}.json`,
+          );
+          const currentScreenshotsDir = path.join(
+            suitesDir,
+            `suite-${currentSuiteName}-${timestamp}.screenshots`,
+          );
+          await fs.mkdir(currentScreenshotsDir, { recursive: true });
+
+          const serializer = new TestSerializer();
+          serializer.startTest(currentTest.requirement, currentTest.url, currentTest.appId);
+          serializer.setOutPath(currentSuitePath);
+          activeSerializer = serializer;
+
+          const serializedTest = serializer.getTest();
+          if (serializedTest) {
+            if (currentTest.appId) serializedTest.appId = currentTest.appId;
+            if (currentTest.id) serializedTest.testId = currentTest.id;
+          }
+
+          const depConfig = dependencyMap.get(currentTest.id);
+          const shouldUseReplay =
+            isPrereq &&
+            depConfig?.executionMode !== "agent_only" &&
+            currentTest.lastRunPath;
+
+          if (shouldUseReplay && currentTest.lastRunPath) {
+            // Replay execution for prerequisite
+            await replayTest(
+              currentTest.lastRunPath,
+              browser,
+              aiModel,
+              currentScreenshotsDir,
+              false,
+              false,
+              (update) => {
+                if (mainWindow) mainWindow.webContents.send("test-step", update);
+              },
+              (checklist) => {
+                if (mainWindow)
+                  mainWindow.webContents.send("test-checklist", checklist);
+              },
+              (planning) => {
+                if (mainWindow)
+                  mainWindow.webContents.send("test-planning-state", planning);
+              },
+              activeTestController.signal,
+              modelSupportsVision,
+              true, // auto-accept during precondition replay
+            );
+          } else {
+            // Live agent execution
+            await browser.execute({ kind: "navigate", url: currentTest.url });
+            const runner = config.visualFirst ? runVisualAgent : runAgent;
+            await runner(
+              currentTest.requirement,
+              browser,
+              aiModel,
+              serializer,
+              artifactsDir,
+              false,
+              false,
+              (update) => {
+                if (mainWindow) mainWindow.webContents.send("test-step", update);
+              },
+              (checklist) => {
+                if (mainWindow)
+                  mainWindow.webContents.send("test-checklist", checklist);
+              },
+              async (checklist) => {
+                if (!mainWindow || isPrereq) return { action: "accept" };
+                return new Promise((resolve, reject) => {
+                  planApprovalPromise = { resolve, reject };
+                  mainWindow?.webContents.send("plan-approval-request", checklist);
+                });
+              },
+              async (checklist) => {
+                if (!mainWindow || isPrereq) return { action: "validate" };
+                return new Promise((resolve, reject) => {
+                  goalValidationPromise = { resolve, reject };
+                  mainWindow?.webContents.send("execution-finished", checklist);
+                });
+              },
+              (planning) => {
+                if (mainWindow)
+                  mainWindow.webContents.send("test-planning-state", planning);
+              },
+              async (checklist) => {
+                if (!mainWindow || isPrereq) return { action: "resume" };
+                if (!isPaused) return { action: "resume" };
+
+                return new Promise((resolve, reject) => {
+                  pausePromise = { resolve, reject };
+                  mainWindow?.webContents.send("pause-request", checklist);
+                });
+              },
+              currentScreenshotsDir,
+              (issues) => {
+                if (mainWindow) mainWindow.webContents.send("test-issues", issues);
+              },
+              activeTestController.signal,
+              modelSupportsVision,
+              isPrereq ? true : !config.requirePlanApproval,
+              currentTest.appId,
+              currentTest.id,
+            );
+          }
+
+          // Save last run path and capture session state if configured
+          if (currentTest.id) {
+            const currentTests = await data.listTests();
+            const idx = currentTests.findIndex((t) => t.id === currentTest.id);
+            if (idx !== -1) {
+              currentTests[idx].lastRunPath = currentSuitePath;
+              if (currentTest.captureSessionOnSuccess) {
+                const sessionFile = path.join(
+                  data.storageStatesDir,
+                  `session-${currentTest.id}.json`,
+                );
+                await browser.exportStorageState(sessionFile);
+                currentTests[idx].savedStorageStatePath = sessionFile;
+
+                if (currentTest.savedAuthProfileId) {
+                  const profiles = await data.listAuthProfiles();
+                  const pIdx = profiles.findIndex(
+                    (p) => p.id === currentTest.savedAuthProfileId,
+                  );
+                  if (pIdx !== -1) {
+                    profiles[pIdx].storageStatePath = sessionFile;
+                    profiles[pIdx].updatedAt = Date.now();
+                    await data.saveAuthProfiles(profiles);
+                  }
+                }
+              }
+              await data.saveTests(currentTests);
+            }
+          }
+
+          // Generate markdown report for target test
+          if (isTarget) {
+            lastSuitePath = currentSuitePath;
+            const testData = serializer.getTest();
+            if (testData) {
+              const reportFileName = path
+                .basename(currentSuitePath)
+                .replace(".json", ".report.md");
+              await generateMarkdownReport(testData, suitesDir, reportFileName);
+            }
+          }
+
+          if (isPrereq && mainWindow) {
+            mainWindow.webContents.send("test-precondition-status", {
+              phase: "precondition",
+              currentTestId: currentTest.id,
+              currentTestName: currentTest.name,
+              index: i + 1,
+              total: totalPrereqs,
+              status: "passed",
             });
-          },
-          sessionScreenshotsDir,
-          (issues) => {
-            if (mainWindow) mainWindow.webContents.send("test-issues", issues);
-          },
-          activeTestController.signal,
-          modelSupportsVision,
-          !config.requirePlanApproval,
-          appId,
-          testId,
-        );
+          }
+        }
 
         const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
-
-        // Link result to test ID if provided
-        if (testId) {
-          const tests = await data.listTests();
-          const testIndex = tests.findIndex((t) => t.id === testId);
-          if (testIndex !== -1) {
-            tests[testIndex].lastRunPath = suitePath;
-            await data.saveTests(tests);
-          }
-        }
-
-        // Generate markdown report
-        const testData = serializer.getTest();
-        if (testData) {
-          const reportFileName = path
-            .basename(suitePath)
-            .replace(".json", ".report.md");
-          await generateMarkdownReport(testData, suitesDir, reportFileName);
+        if (activeSerializer) {
+          const testData = activeSerializer.getTest();
+          activeSerializer.logger.logCompletion({
+            success: true,
+            duration: totalDuration,
+            totalTasks: testData?.checklist?.tasks?.length,
+            tasksCompleted: testData?.checklist?.tasks?.filter((t: any) => t.status === "completed").length,
+            issuesCount: testData?.issues?.length,
+          });
+          await activeSerializer.saveTest().catch(() => {});
         }
 
         if (mainWindow) {
+          mainWindow.webContents.send("test-precondition-status", {
+            phase: "idle",
+            status: "passed",
+          });
           mainWindow.webContents.send("test-complete", {
             success: true,
             duration: totalDuration,
-            suitePath,
+            suitePath: lastSuitePath,
           });
         }
       } catch (error: any) {
         console.error("Test execution failed:", error);
+        if (activeSerializer) {
+          activeSerializer.logger.logError("Test Execution Failed", error);
+          activeSerializer.logger.logCompletion({ success: false, error: error.message });
+          await activeSerializer.saveTest().catch(() => {});
+        }
+
         if (mainWindow) {
           const totalDuration = `${((Date.now() - testStartTime) / 1000).toFixed(1)}s`;
+          mainWindow.webContents.send("test-precondition-status", {
+            phase: "idle",
+            status: "failed",
+            message: error.message,
+          });
           mainWindow.webContents.send("test-complete", {
             success: false,
             error: error.message,
@@ -283,6 +511,16 @@ app.whenReady().then(async () => {
       }
     },
   );
+
+  ipcMain.handle("get-suite-log", async (event, suitePath) => {
+    try {
+      const logPath = suitePath.replace(".json", ".log");
+      const content = await fs.readFile(logPath, "utf-8");
+      return content;
+    } catch (error: any) {
+      return `No execution log found for ${suitePath}`;
+    }
+  });
 
   ipcMain.on("stop-test", () => {
     if (activeTestController) activeTestController.abort();
@@ -570,6 +808,87 @@ app.whenReady().then(async () => {
     const filteredVariables = variables.filter((v) => v.id !== varId);
     await data.saveVariables(filteredVariables);
     return { success: true };
+  });
+
+  // Auth Profile Management
+  ipcMain.handle("list-auth-profiles", async (event, appId) => {
+    return await data.listAuthProfiles(appId);
+  });
+
+  ipcMain.handle("create-auth-profile", async (event, { appId, name, description, expiry, sourceTestId }) => {
+    const profiles = await data.listAuthProfiles();
+    const id = `auth-${Date.now()}`;
+    const storageStatePath = path.join(data.storageStatesDir, `auth-${id}.json`);
+    const newProfile: data.AuthProfile = {
+      id,
+      appId,
+      name,
+      description,
+      storageStatePath,
+      expiry,
+      sourceTestId,
+      updatedAt: Date.now(),
+    };
+    profiles.push(newProfile);
+    await data.saveAuthProfiles(profiles);
+    return newProfile;
+  });
+
+  ipcMain.handle("update-auth-profile", async (event, { profileId, config }) => {
+    const profiles = await data.listAuthProfiles();
+    const index = profiles.findIndex((p) => p.id === profileId);
+    if (index !== -1) {
+      profiles[index] = { ...profiles[index], ...config, updatedAt: Date.now() };
+      await data.saveAuthProfiles(profiles);
+      return profiles[index];
+    }
+    throw new Error("Auth Profile not found");
+  });
+
+  ipcMain.handle("delete-auth-profile", async (event, profileId) => {
+    const profiles = await data.listAuthProfiles();
+    const target = profiles.find((p) => p.id === profileId);
+    if (target && target.storageStatePath) {
+      try {
+        await fs.rm(target.storageStatePath, { force: true });
+      } catch (e) {}
+    }
+    await data.deleteAuthProfile(profileId);
+    return { success: true };
+  });
+
+  ipcMain.handle("get-auth-profile-details", async (event, profileId) => {
+    const profiles = await data.listAuthProfiles();
+    const target = profiles.find((p) => p.id === profileId);
+    if (!target) {
+      throw new Error("Auth profile not found");
+    }
+
+    let cookies: any[] = [];
+    let origins: any[] = [];
+    let fileExists = false;
+    let rawJson = "";
+
+    if (target.storageStatePath) {
+      try {
+        const content = await fs.readFile(target.storageStatePath, "utf-8");
+        rawJson = content;
+        const parsed = JSON.parse(content);
+        cookies = parsed.cookies || [];
+        origins = parsed.origins || [];
+        fileExists = true;
+      } catch (e) {
+        fileExists = false;
+      }
+    }
+
+    return {
+      profile: target,
+      fileExists,
+      cookies,
+      origins,
+      rawJson,
+    };
   });
 
   // Agent Error Management

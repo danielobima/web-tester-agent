@@ -30,9 +30,20 @@ export const Execution = () => {
     null,
   );
   const [isViewingReport, setIsViewingReport] = useState(false);
+  const [reportTab, setReportTab] = useState<"report" | "log">("report");
   const [reportContent, setReportContent] = useState<string>("");
+  const [reportLogContent, setReportLogContent] = useState<string>("");
   const [issues, setIssues] = useState<any[]>([]);
   const [hasFailed, setHasFailed] = useState(false);
+  const [preconditionStatus, setPreconditionStatus] = useState<{
+    phase: "precondition" | "target" | "idle";
+    currentTestId?: string;
+    currentTestName?: string;
+    index?: number;
+    total?: number;
+    status?: "running" | "passed" | "failed";
+    message?: string;
+  }>({ phase: "idle" });
 
   useEffect(() => {
     const unsubStep = window.electron.onTestStep((step: TestStep) => {
@@ -41,6 +52,10 @@ export const Execution = () => {
         if (exists) return prev.map((p) => (p.id === step.id ? step : p));
         return [...prev, step];
       });
+    });
+
+    const unsubPrecondition = window.electron.onPreconditionStatus((status) => {
+      setPreconditionStatus(status);
     });
 
     const unsubChecklist = window.electron.onTestChecklist(
@@ -112,6 +127,7 @@ export const Execution = () => {
 
     return () => {
       unsubStep();
+      unsubPrecondition();
       unsubChecklist();
       unsubPlanRequest();
       unsubExecutionFinished();
@@ -178,9 +194,12 @@ export const Execution = () => {
   const handleViewReport = async () => {
     if (completedSuitePath) {
       try {
-        const content =
-          await window.electron.getSuiteReport(completedSuitePath);
+        const [content, logContent] = await Promise.all([
+          window.electron.getSuiteReport(completedSuitePath),
+          window.electron.getSuiteLog(completedSuitePath),
+        ]);
         setReportContent(content);
+        setReportLogContent(logContent);
         setIsViewingReport(true);
       } catch (error) {
         console.error("Failed to load report:", error);
@@ -227,6 +246,58 @@ export const Execution = () => {
               </div>
             )}
           </div>
+
+          {/* Precondition Execution Banner */}
+          {preconditionStatus.phase === "precondition" && (
+            <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-500 flex items-center justify-center font-bold text-xs">
+                  {preconditionStatus.index || 1}/{preconditionStatus.total || 1}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-blue-500 text-white px-1.5 py-0.5 rounded">
+                      Precondition Running
+                    </span>
+                    <h4 className="text-sm font-bold text-on-surface">
+                      {preconditionStatus.currentTestName || "Prerequisite Step"}
+                    </h4>
+                  </div>
+                  <p className="text-xs text-on-surface/50 mt-0.5">
+                    Executing prerequisite workflow to populate session, records, or variables...
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-ping"></span>
+                <span className="text-xs font-bold text-blue-500 uppercase tracking-wider">In Progress</span>
+              </div>
+            </div>
+          )}
+
+          {preconditionStatus.phase === "target" && (
+            <div className="p-4 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between animate-in fade-in duration-300">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center font-bold text-xs">
+                  <Icons.Lightning className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-primary text-white px-1.5 py-0.5 rounded">
+                      Main Test Active
+                    </span>
+                    <h4 className="text-sm font-bold text-on-surface">
+                      {preconditionStatus.currentTestName || "Target Test"}
+                    </h4>
+                  </div>
+                  <p className="text-xs text-on-surface/50 mt-0.5">
+                    All preconditions resolved. Executing final target test requirement.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-12 gap-8 items-start">
             <div className="col-span-12 lg:col-span-3 lg:sticky lg:top-10 z-10 space-y-8">
@@ -278,11 +349,30 @@ export const Execution = () => {
 
       {/* Report Slide-over */}
       {isViewingReport && (
-        <div className="fixed right-0 top-0 h-full w-[600px] bg-surface-lowest border-l border-on-surface/10 shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col z-30">
-          <div className="p-8 border-b border-on-surface/5 flex items-center justify-between shrink-0">
-            <h2 className="text-xl font-bold font-display tracking-tight text-primary uppercase tracking-widest text-sm">
-              Execution Report
-            </h2>
+        <div className="fixed right-0 top-0 h-full w-[680px] bg-surface-lowest border-l border-on-surface/10 shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col z-30">
+          <div className="p-6 border-b border-on-surface/5 flex items-center justify-between shrink-0 bg-surface-low/50">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setReportTab("report")}
+                className={`text-xs font-bold uppercase tracking-wider py-1.5 px-3 rounded-lg transition-colors ${
+                  reportTab === "report"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-on-surface/40 hover:text-on-surface"
+                }`}
+              >
+                Visual Report
+              </button>
+              <button
+                onClick={() => setReportTab("log")}
+                className={`text-xs font-bold uppercase tracking-wider py-1.5 px-3 rounded-lg transition-colors ${
+                  reportTab === "log"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-on-surface/40 hover:text-on-surface"
+                }`}
+              >
+                Raw Execution Log
+              </button>
+            </div>
             <button
               onClick={() => setIsViewingReport(false)}
               className="p-2 hover:bg-on-surface/5 rounded-full transition-colors text-on-surface/40"
@@ -292,14 +382,33 @@ export const Execution = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto p-8">
-            <MarkdownRenderer
-              content={reportContent}
-              basePath={
-                completedSuitePath
-                  ? completedSuitePath.split("/").slice(0, -1).join("/")
-                  : undefined
-              }
-            />
+            {reportTab === "report" ? (
+              <MarkdownRenderer
+                content={reportContent}
+                basePath={
+                  completedSuitePath
+                    ? completedSuitePath.split("/").slice(0, -1).join("/")
+                    : undefined
+                }
+              />
+            ) : (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold uppercase tracking-widest text-on-surface/40">
+                    Full Agent Trace & Output
+                  </span>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(reportLogContent)}
+                    className="bg-surface-low hover:bg-surface border border-on-surface/10 text-xs font-bold px-3 py-1.5 rounded-lg text-primary transition-colors"
+                  >
+                    Copy Full Log
+                  </button>
+                </div>
+                <pre className="p-4 bg-surface-low rounded-xl border border-on-surface/10 font-mono text-xs text-on-surface/80 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                  {reportLogContent || "No log content available"}
+                </pre>
+              </div>
+            )}
           </div>
         </div>
       )}

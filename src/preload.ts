@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   getSuite: (suitePath: string) => ipcRenderer.invoke('get-suite', suitePath),
   getSuiteReport: (suitePath: string) => ipcRenderer.invoke('get-suite-report', suitePath),
+  getSuiteLog: (suitePath: string) => ipcRenderer.invoke('get-suite-log', suitePath),
   deleteSuite: (suitePath: string) => ipcRenderer.invoke('delete-suite', suitePath),
   onTestStep: (callback: (step: any) => void) => {
     const subscription = (event: any, step: any) => callback(step);
@@ -89,6 +90,20 @@ contextBridge.exposeInMainWorld('electron', {
   createVariable: (config: { appId: string, name: string, type: string, value: string, purpose: string, expiry?: string }) => ipcRenderer.invoke("create-variable", config),
   updateVariable: (varId: string, config: any) => ipcRenderer.invoke("update-variable", { varId, config }),
   deleteVariable: (varId: string) => ipcRenderer.invoke("delete-variable", varId),
+
+  // Auth Profile Management
+  listAuthProfiles: (appId?: string) => ipcRenderer.invoke("list-auth-profiles", appId),
+  getAuthProfileDetails: (profileId: string) => ipcRenderer.invoke("get-auth-profile-details", profileId),
+  createAuthProfile: (config: { appId: string, name: string, description?: string, expiry?: string, sourceTestId?: string }) => ipcRenderer.invoke("create-auth-profile", config),
+  updateAuthProfile: (profileId: string, config: any) => ipcRenderer.invoke("update-auth-profile", { profileId, config }),
+  deleteAuthProfile: (profileId: string) => ipcRenderer.invoke("delete-auth-profile", profileId),
+
+  // Precondition Status
+  onPreconditionStatus: (callback: (status: any) => void) => {
+    const subscription = (event: any, status: any) => callback(status);
+    ipcRenderer.on('test-precondition-status', subscription);
+    return () => ipcRenderer.removeListener('test-precondition-status', subscription);
+  },
 
   startTest: (url: string, requirement: string, testId?: string, model?: string) => {
     ipcRenderer.send('start-test', { url, requirement, testId, model });

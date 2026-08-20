@@ -101,7 +101,11 @@ export class BrowserManager {
   // Track all pages in the context
   public pages: Page[] = [];
 
-  async init(headless: boolean = false, autoKillZombies: boolean = true) {
+  async init(
+    headless: boolean = false,
+    autoKillZombies: boolean = true,
+    storageState?: string | { cookies: any[]; origins: any[] },
+  ) {
     if (this.browser) return; // Already initialized
 
     if (autoKillZombies) {
@@ -118,7 +122,9 @@ export class BrowserManager {
 
     this.cdpUrl = `http://localhost:${port}`;
 
-    this.context = await this.browser.newContext();
+    this.context = await this.browser.newContext({
+      ...(storageState ? { storageState } : {}),
+    });
     
     // Listen for new pages to automatically track them
     this.context.on("page", async (newPage) => {
@@ -767,4 +773,63 @@ export class BrowserManager {
         break;
     }
   }
+
+  getContext(): BrowserContext | null {
+    return this.context;
+  }
+
+  async exportStorageState(savePath?: string): Promise<any> {
+    if (!this.context) {
+      throw new Error("Cannot export storage state: Browser context is not initialized.");
+    }
+    if (savePath) {
+      await this.context.storageState({ path: savePath });
+      return null;
+    }
+    return await this.context.storageState();
+  }
+
+  async injectCookies(cookies: any[]): Promise<void> {
+    if (!this.context) {
+      throw new Error("Cannot inject cookies: Browser context is not initialized.");
+    }
+    if (cookies && cookies.length > 0) {
+      await this.context.addCookies(cookies);
+    }
+  }
+
+  async injectLocalStorage(entries: { origin: string; key: string; value: string }[]): Promise<void> {
+    if (!entries || entries.length === 0) return;
+    
+    // Group by origin
+    const byOrigin = new Map<string, { key: string; value: string }[]>();
+    for (const entry of entries) {
+      if (!byOrigin.has(entry.origin)) {
+        byOrigin.set(entry.origin, []);
+      }
+      byOrigin.get(entry.origin)!.push(entry);
+    }
+
+    for (const [origin, items] of byOrigin.entries()) {
+      if (!this.page) continue;
+      // Navigate to origin or add init script
+      try {
+        await this.context?.addInitScript(
+          ({ targetOrigin, kvItems }) => {
+            if (window.location.origin === targetOrigin || targetOrigin === "*") {
+              for (const item of kvItems) {
+                try {
+                  window.localStorage.setItem(item.key, item.value);
+                } catch (e) {}
+              }
+            }
+          },
+          { targetOrigin: origin, kvItems: items },
+        );
+      } catch (err) {
+        console.warn(`[Browser] Failed to inject localStorage for origin ${origin}:`, err);
+      }
+    }
+  }
 }
+

@@ -256,7 +256,23 @@ export async function typeViaPlaywright(opts: {
       await locator.click({ timeout });
       await locator.type(text, { timeout, delay: 75 });
     } else {
-      await locator.fill(text, { timeout });
+      try {
+        await locator.fill(text, { timeout });
+      } catch (fillErr: any) {
+        try {
+          const innerInput = locator.locator("input, textarea, [contenteditable='true']").first();
+          if ((await innerInput.count()) > 0) {
+            await innerInput.fill(text, { timeout });
+          } else {
+            await locator.click({ timeout });
+            await page.keyboard.press("ControlOrMeta+a");
+            await page.keyboard.press("Backspace");
+            await page.keyboard.type(text, { delay: 20 });
+          }
+        } catch (innerErr) {
+          throw fillErr;
+        }
+      }
     }
     if (opts.submit) {
       await locator.press("Enter", { timeout });
@@ -310,7 +326,19 @@ export async function fillFormViaPlaywright(opts: {
     try {
       await locator.fill(value, { timeout });
     } catch (err) {
-      throw toAIFriendlyError(err, formatRefForError(refOpts));
+      try {
+        const innerInput = locator.locator("input, textarea, [contenteditable='true']").first();
+        if ((await innerInput.count()) > 0) {
+          await innerInput.fill(value, { timeout });
+        } else {
+          await locator.click({ timeout });
+          await page.keyboard.press("ControlOrMeta+a");
+          await page.keyboard.press("Backspace");
+          await page.keyboard.type(value, { delay: 20 });
+        }
+      } catch (innerErr) {
+        throw toAIFriendlyError(err, formatRefForError(refOpts));
+      }
     }
   }
 }
