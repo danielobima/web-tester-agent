@@ -371,3 +371,90 @@ export function resolveTestDependencyChain(
   return { executionChain, dependencyPreconditions };
 }
 
+export function normalizeVariableName(name: string): string {
+  return name
+    .trim()
+    .replace(/([a-z])([A-Z])/g, "$1_$2") // convert camelCase to snake_case
+    .replace(/[^a-zA-Z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .toUpperCase()
+    .replace(/^_+|_+$/g, "");
+}
+
+export function getSemanticRoot(name: string): string {
+  let clean = normalizeVariableName(name);
+  const prefixes = ["SELECTED_", "CHOSEN_", "CURRENT_", "ACTIVE_", "NEW_", "TARGET_", "INPUT_", "FORM_"];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const prefix of prefixes) {
+      if (clean.startsWith(prefix)) {
+        clean = clean.substring(prefix.length);
+        changed = true;
+      }
+    }
+  }
+  changed = true;
+  while (changed) {
+    changed = false;
+    const suffixes = ["_NAME", "_VALUE", "_TEXT", "_FIELD", "_VAL", "_INPUT", "_VAR", "_1", "_2", "_3"];
+    for (const suffix of suffixes) {
+      if (clean.endsWith(suffix)) {
+        clean = clean.substring(0, clean.length - suffix.length);
+        changed = true;
+      }
+    }
+  }
+  return clean;
+}
+
+function calculateStringOverlap(str1: string, str2: string): number {
+  const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(w => w.length > 2);
+  const w1 = new Set(words(str1));
+  const w2 = new Set(words(str2));
+  if (w1.size === 0 || w2.size === 0) return 0;
+  let intersection = 0;
+  for (const w of w1) {
+    if (w2.has(w)) intersection++;
+  }
+  return intersection / Math.max(w1.size, w2.size);
+}
+
+export function isSimilarVariable(
+  v1: { name: string; purpose?: string },
+  v2: { name: string; purpose?: string }
+): boolean {
+  const n1 = normalizeVariableName(v1.name);
+  const n2 = normalizeVariableName(v2.name);
+  if (n1 === n2) return true;
+
+  const r1 = getSemanticRoot(n1);
+  const r2 = getSemanticRoot(n2);
+  if (r1 === r2 && r1.length > 2) return true;
+
+  if ((n1.includes(n2) || n2.includes(n1)) && Math.min(n1.length, n2.length) >= 4) {
+    return true;
+  }
+
+  if (v1.purpose && v2.purpose) {
+    const overlap = calculateStringOverlap(v1.purpose, v2.purpose);
+    if (overlap >= 0.6) {
+      const words1 = new Set(n1.split("_").filter(w => w.length > 2));
+      const words2 = new Set(n2.split("_").filter(w => w.length > 2));
+      let shareKeyword = false;
+      for (const w of words1) {
+        if (words2.has(w)) {
+          shareKeyword = true;
+          break;
+        }
+      }
+      if (shareKeyword || words1.size === 0 || words2.size === 0) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+

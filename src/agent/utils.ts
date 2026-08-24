@@ -444,159 +444,96 @@ export async function interceptVariables(
   createdVariableName?: string,
   createdVariablePurpose?: string,
 ): Promise<data.Variable[]> {
-  const intercepted: { name: string; value: string; isSecret: boolean; purpose?: string }[] = [];
+  if (!createdVariableName) {
+    return activeVariables;
+  }
 
-  const processField = async (field: any, kind: string) => {
-    let val = "";
-    if (kind === "type") {
-      val = field.text !== undefined ? String(field.text) : (field.value !== undefined ? String(field.value) : "");
-    } else if (kind === "select_option") {
-      val = field.value !== undefined ? String(field.value) : "";
-    } else if (kind === "select") {
-      val = Array.isArray(field.values) ? field.values.join(", ") : (field.value !== undefined ? String(field.value) : "");
-    } else {
-      val = field.value !== undefined ? String(field.value) : "";
+  const varName = data.normalizeVariableName(createdVariableName);
+  let val = "";
+  let isSecret = false;
+
+  if (action.kind === "type" || action.kind === "select_option" || action.kind === "select") {
+    val = action.text !== undefined ? String(action.text) : (action.value !== undefined ? String(action.value) : "");
+    if (!val && Array.isArray(action.values)) {
+      val = action.values.join(", ");
     }
+  } else if (action.kind === "fill" && Array.isArray(action.fields)) {
+    const passwordField = action.fields.find((f: any) => {
+      const lowerName = (f.name || "").toLowerCase();
+      return lowerName.includes("password") || lowerName.includes("secret") || lowerName.includes("token");
+    });
+    const matchingField = passwordField || action.fields.find((f: any) => {
+      return f.name && data.normalizeVariableName(f.name) === varName;
+    }) || action.fields[0];
 
-    if (val === undefined || val === null || val === "") {
-      return;
-    }
-
-    let name = field.name || "";
-    let isSecret = false;
-
-    if (browser.page) {
-      try {
-        const locator = await browser.getLocator(field);
-        if (locator) {
-          if (!name) {
-            name = await locator.getAttribute("name").catch(() => "") ||
-                   await locator.getAttribute("placeholder").catch(() => "") ||
-                   await locator.getAttribute("id").catch(() => "") || "";
-          }
-          const typeAttr = await locator.getAttribute("type").catch(() => "");
-          if (typeAttr === "password") {
-            isSecret = true;
-          }
-        }
-      } catch (err) {
-        // Ignore locator or page errors
-      }
-    }
-
-    if (!name) {
-      if (field.ref) {
-        name = `${kind}_${field.ref}`;
-      } else {
-        name = `${kind}_field`;
-      }
-    }
-
-    // Clean name to be a valid identifier
-    name = name.trim().replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
-    if (!name) {
-      name = `${kind}_field_${Date.now()}`;
-    }
-
-    const lowerName = name.toLowerCase();
-    if (
-      lowerName.includes("password") ||
-      lowerName.includes("secret") ||
-      lowerName.includes("token") ||
-      lowerName.includes("credential")
-    ) {
-      isSecret = true;
-    }
-
-    intercepted.push({ name, value: val, isSecret });
-  };
-
-  if (taskType === "selection") {
-    let val = "";
-    if (action.kind === "click" || action.kind === "click_selector") {
-      val = action.name || "";
-      if (!val && browser.page) {
+    if (matchingField) {
+      val = matchingField.value !== undefined ? String(matchingField.value) : "";
+      if (matchingField.ref && browser.page) {
         try {
-          const loc = action.selector ? browser.page.locator(action.selector) : await browser.getLocator(action);
-          if (loc) {
-            val = await loc.textContent().catch(() => "") || await loc.innerText().catch(() => "");
-            val = val.trim();
+          const locator = await browser.getLocator(matchingField);
+          if (locator) {
+            const typeAttr = await locator.getAttribute("type").catch(() => "");
+            if (typeAttr === "password") {
+              isSecret = true;
+            }
           }
         } catch (err) {}
       }
-    } else if (action.kind === "select_option" || action.kind === "select") {
-      val = action.value || (Array.isArray(action.values) ? action.values.join(", ") : "");
     }
-
-    if (val) {
-      let varName = createdVariableName ? createdVariableName.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_") : "";
-      if (!varName) {
-        let defaultVarName = "SELECTED_ITEM";
-        const descLower = (taskDescription || "").toLowerCase();
-        if (descLower.includes("product")) {
-          defaultVarName = "PRODUCT_NAME";
-        } else if (descLower.includes("flight")) {
-          defaultVarName = "FLIGHT_NAME";
-        } else if (descLower.includes("hotel")) {
-          defaultVarName = "HOTEL_NAME";
-        } else if (descLower.includes("option")) {
-          defaultVarName = "OPTION_NAME";
-        } else if (descLower.includes("size")) {
-          defaultVarName = "SIZE_NAME";
-        } else if (descLower.includes("color")) {
-          defaultVarName = "COLOR_NAME";
+  } else if (action.kind === "click" || action.kind === "click_selector") {
+    if (browser.page) {
+      try {
+        const loc = action.selector ? browser.page.locator(action.selector) : await browser.getLocator(action);
+        if (loc) {
+          val = await loc.textContent().catch(() => "") || await loc.innerText().catch(() => "");
+          val = val.trim();
         }
-        varName = defaultVarName;
-      }
-
-      let purpose = createdVariablePurpose || "";
-      if (!purpose) {
-        const noun = varName.replace("_NAME", "").replace("SELECTED_", "").toLowerCase();
-        purpose = `The ${noun} that should be chosen.`;
-      }
-
-      intercepted.push({
-        name: varName,
-        value: val,
-        isSecret: false,
-        purpose,
-      });
+      } catch (err) {}
     }
-  } else if (action.kind === "type" || action.kind === "select_option" || action.kind === "select") {
-    await processField(action, action.kind);
-  } else if (action.kind === "fill" && Array.isArray(action.fields)) {
-    for (const field of action.fields) {
-      await processField(field, "fill");
+    if (!val) {
+      val = action.name || "";
     }
   }
 
-  if (intercepted.length === 0) {
+  if (val === undefined || val === null || val === "") {
     return activeVariables;
+  }
+
+  const lowerName = varName.toLowerCase();
+  if (
+    lowerName.includes("password") ||
+    lowerName.includes("secret") ||
+    lowerName.includes("token") ||
+    lowerName.includes("credential")
+  ) {
+    isSecret = true;
   }
 
   const allVars = await data.listVariables();
   const currentAppId = appId || "cli";
 
-  for (const item of intercepted) {
-    const existingIndex = allVars.findIndex(
-      (v) => v.appId === currentAppId && v.name === item.name && v.testId === testId
-    );
-    const updatedVar: data.Variable = {
-      id: existingIndex !== -1 ? allVars[existingIndex].id : `var-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      appId: currentAppId,
-      testId: testId || undefined,
-      name: item.name,
-      type: item.isSecret ? "secret" : "string",
-      value: item.value,
-      purpose: item.purpose || intendedActionDescription || "Intercepted from agent action during task execution.",
-      createdAt: Date.now(),
-    };
+  const existingIndex = allVars.findIndex(
+    (v) =>
+      v.appId === currentAppId &&
+      (v.testId === testId || (!v.testId && !testId)) &&
+      data.isSimilarVariable(v, { name: varName, purpose: createdVariablePurpose })
+  );
 
-    if (existingIndex !== -1) {
-      allVars[existingIndex] = updatedVar;
-    } else {
-      allVars.push(updatedVar);
-    }
+  const updatedVar: data.Variable = {
+    id: existingIndex !== -1 ? allVars[existingIndex].id : `var-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    appId: currentAppId,
+    testId: testId || undefined,
+    name: existingIndex !== -1 ? allVars[existingIndex].name : varName,
+    type: isSecret ? "secret" : (existingIndex !== -1 ? allVars[existingIndex].type : "string"),
+    value: val,
+    purpose: createdVariablePurpose || (existingIndex !== -1 ? allVars[existingIndex].purpose : intendedActionDescription || "Explicitly created variable during task execution."),
+    createdAt: existingIndex !== -1 ? allVars[existingIndex].createdAt : Date.now(),
+  };
+
+  if (existingIndex !== -1) {
+    allVars[existingIndex] = updatedVar;
+  } else {
+    allVars.push(updatedVar);
   }
 
   await data.saveVariables(allVars);

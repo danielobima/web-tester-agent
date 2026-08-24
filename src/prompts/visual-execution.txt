@@ -40,6 +40,16 @@ QA Analysis Instructions:
 3. Logical errors: If you see any logical inconsistencies in the application, report them in 'issues'.
 4. Technical Observations: Strictly monitor Console Errors and Network Failures and report them as High or Critical if they impact the user flow.
 
+Variable Creation Instructions:
+1. When to create a variable:
+   a) Capture dynamic values: Create a variable when you encounter a dynamic/random value (e.g. Order ID, confirmation code, transaction reference, transaction status) that might be useful for subsequent tasks.
+   b) Capture specific request: Create a variable when explicitly asked to capture a value in the task description.
+   c) Credentials/Secrets: If entering credentials (like password), save them as a secret.
+   d) Parameterize dynamic choices: Save choice names (like product selected, selected option) to variables.
+2. How to create a variable:
+   - To save a variable from the action you are taking, you MUST define `createdVariableName` (e.g. "ORDER_ID", "PASSWORD") and `createdVariablePurpose` (e.g. "The generated order reference number.") at the root level of your JSON response. Ensure the name is uppercase snake_case.
+
 CRITICAL: If previous actions failed to execute, brainstorm a different approach, change the order of actions, or try a different set of elements.
 
 CRITICAL: You MUST output ONLY a valid JSON object matching the requested ExecutionResponseSchema exactly.
+

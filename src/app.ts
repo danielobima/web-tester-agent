@@ -776,14 +776,35 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("create-variable", async (event, { appId, testId, name, type, value, purpose, expiry }) => {
     const variables = await data.listVariables();
+    const varName = data.normalizeVariableName(name);
+    
+    const existingIndex = variables.findIndex(
+      (v) =>
+        v.appId === appId &&
+        (v.testId === testId || (!v.testId && !testId)) &&
+        data.isSimilarVariable(v, { name: varName, purpose })
+    );
+
+    if (existingIndex !== -1) {
+      variables[existingIndex] = {
+        ...variables[existingIndex],
+        value,
+        type: type || variables[existingIndex].type,
+        purpose: purpose || variables[existingIndex].purpose,
+        expiry: expiry || variables[existingIndex].expiry,
+      };
+      await data.saveVariables(variables);
+      return variables[existingIndex];
+    }
+
     const newVar = {
       id: `var-${Date.now()}`,
       appId,
       testId,
-      name,
-      type,
+      name: varName,
+      type: type || "string",
       value,
-      purpose,
+      purpose: purpose || "",
       expiry,
       createdAt: Date.now(),
     };

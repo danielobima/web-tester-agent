@@ -566,21 +566,19 @@ export async function runVisualAgent(
               `[VisualAgent] Extracted variable '${action.name}' value: '${extractedValue}'`,
             );
 
+            const varName = data.normalizeVariableName(action.name);
             if (appId) {
               const vars = await data.listVariables(appId);
-              const existingIndex = vars.findIndex((v) => v.name === action.name);
+              const existingIndex = vars.findIndex((v) => data.isSimilarVariable(v, { name: varName, purpose: action.purpose }));
               const updatedVar: data.Variable = {
-                id:
-                  existingIndex !== -1
-                    ? vars[existingIndex].id
-                    : `var-${Date.now()}`,
+                id: existingIndex !== -1 ? vars[existingIndex].id : `var-${Date.now()}`,
                 appId,
-                name: action.name,
-                type: action.type || "string",
+                name: existingIndex !== -1 ? vars[existingIndex].name : varName,
+                type: action.type || (existingIndex !== -1 ? vars[existingIndex].type : "string"),
                 value: extractedValue,
-                purpose: action.purpose,
-                expiry: action.expiry,
-                createdAt: Date.now(),
+                purpose: action.purpose || (existingIndex !== -1 ? vars[existingIndex].purpose : ""),
+                expiry: action.expiry || (existingIndex !== -1 ? vars[existingIndex].expiry : undefined),
+                createdAt: existingIndex !== -1 ? vars[existingIndex].createdAt : Date.now(),
               };
               if (existingIndex !== -1) {
                 vars[existingIndex] = updatedVar;
@@ -590,21 +588,16 @@ export async function runVisualAgent(
               await data.saveVariables(vars);
               activeVariables = vars;
             } else {
-              const existingIndex = activeVariables.findIndex(
-                (v) => v.name === action.name,
-              );
+              const existingIndex = activeVariables.findIndex((v) => data.isSimilarVariable(v, { name: varName, purpose: action.purpose }));
               const updatedVar: data.Variable = {
-                id:
-                  existingIndex !== -1
-                    ? activeVariables[existingIndex].id
-                    : `var-${Date.now()}`,
+                id: existingIndex !== -1 ? activeVariables[existingIndex].id : `var-${Date.now()}`,
                 appId: "cli",
-                name: action.name,
-                type: action.type || "string",
+                name: existingIndex !== -1 ? activeVariables[existingIndex].name : varName,
+                type: action.type || (existingIndex !== -1 ? activeVariables[existingIndex].type : "string"),
                 value: extractedValue,
-                purpose: action.purpose,
-                expiry: action.expiry,
-                createdAt: Date.now(),
+                purpose: action.purpose || (existingIndex !== -1 ? activeVariables[existingIndex].purpose : ""),
+                expiry: action.expiry || (existingIndex !== -1 ? activeVariables[existingIndex].expiry : undefined),
+                createdAt: existingIndex !== -1 ? activeVariables[existingIndex].createdAt : Date.now(),
               };
               if (existingIndex !== -1) {
                 activeVariables[existingIndex] = updatedVar;
